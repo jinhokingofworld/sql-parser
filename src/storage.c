@@ -37,6 +37,38 @@ static int write_csv_field(FILE *file, const char *field) {
     return fputc('"', file) != EOF;
 }
 
+static int ensure_row_boundary(FILE *file) {
+    long end_position;
+
+    if (fseek(file, 0L, SEEK_END) != 0) {
+        return 0;
+    }
+
+    end_position = ftell(file);
+    if (end_position < 0) {
+        return 0;
+    }
+
+    if (end_position == 0) {
+        return 1;
+    }
+
+    if (fseek(file, -1L, SEEK_END) != 0) {
+        return 0;
+    }
+
+    if (fgetc(file) != '\n') {
+        if (fseek(file, 0L, SEEK_END) != 0) {
+            return 0;
+        }
+        if (fputc('\n', file) == EOF) {
+            return 0;
+        }
+    }
+
+    return fseek(file, 0L, SEEK_END) == 0;
+}
+
 static int append_field(char ***fields, int *count, const char *buffer, size_t length, SqlError *error) {
     char **next_fields = realloc(*fields, sizeof(char *) * (size_t) (*count + 1));
 
@@ -155,7 +187,7 @@ int append_csv_row(
     int field_count,
     SqlError *error
 ) {
-    char path[PATH_MAX];
+    char path[SQL_PATH_BUFFER_SIZE];
     FILE *file;
     int index;
 
@@ -167,6 +199,12 @@ int append_csv_row(
     file = fopen(path, "a");
     if (file == NULL) {
         sql_set_error(error, 0, 0, "failed to open table `%s`: %s", path, strerror(errno));
+        return 0;
+    }
+
+    if (!ensure_row_boundary(file)) {
+        sql_set_error(error, 0, 0, "failed to prepare row boundary for `%s`", path);
+        fclose(file);
         return 0;
     }
 
@@ -201,7 +239,7 @@ int read_csv_rows(
     RowSet *rowset,
     SqlError *error
 ) {
-    char path[PATH_MAX];
+    char path[SQL_PATH_BUFFER_SIZE];
     FILE *file;
     char line[4096];
 
@@ -226,6 +264,10 @@ int read_csv_rows(
 
         while (length > 0 && (line[length - 1] == '\n' || line[length - 1] == '\r')) {
             line[--length] = '\0';
+        }
+
+        if (length == 0) {
+            continue;
         }
 
         next_rows = realloc(rowset->rows, sizeof(Row) * (size_t) (rowset->row_count + 1));

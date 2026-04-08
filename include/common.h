@@ -11,6 +11,7 @@
 #include <string.h>
 
 #define SQL_ERROR_MESSAGE_SIZE 256
+#define SQL_PATH_BUFFER_SIZE 4096
 
 typedef struct {
     int line;

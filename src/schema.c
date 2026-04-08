@@ -108,7 +108,7 @@ int schema_find_column(const Schema *schema, const char *name) {
 
 /* Loads table metadata from `schema/<table>.schema` for validation and ordering. */
 int load_schema(const char *db_root, const char *table_name, Schema *schema, SqlError *error) {
-    char path[PATH_MAX];
+    char path[SQL_PATH_BUFFER_SIZE];
     FILE *file;
     char line[1024];
 
