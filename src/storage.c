@@ -196,7 +196,7 @@ int append_csv_row(
         return 0;
     }
 
-    file = fopen(path, "a");
+    file = fopen(path, "a+");
     if (file == NULL) {
         sql_set_error(error, 0, 0, "failed to open table `%s`: %s", path, strerror(errno));
         return 0;

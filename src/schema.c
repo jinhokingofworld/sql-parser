@@ -74,6 +74,17 @@ static int parse_columns_line(Schema *schema, char *line, SqlError *error) {
     return 1;
 }
 
+static int parse_primary_key_line(Schema *schema, const char *line, SqlError *error) {
+    free(schema->primary_key);
+    schema->primary_key = sql_strdup(line);
+    if (schema->primary_key == NULL) {
+        sql_set_error(error, 0, 0, "out of memory while loading schema");
+        return 0;
+    }
+
+    return 1;
+}
+
 /* Releases schema metadata loaded from the on-disk `.schema` file. */
 void free_schema(Schema *schema) {
     int index;
@@ -83,14 +94,17 @@ void free_schema(Schema *schema) {
     }
 
     free(schema->table_name);
+    free(schema->primary_key);
     for (index = 0; index < schema->column_count; index++) {
         free(schema->columns[index].name);
     }
     free(schema->columns);
 
     schema->table_name = NULL;
+    schema->primary_key = NULL;
     schema->columns = NULL;
     schema->column_count = 0;
+    schema->primary_key_index = -1;
 }
 
 /* Finds a column index by name so executor logic can stay schema-driven. */
@@ -113,6 +127,7 @@ int load_schema(const char *db_root, const char *table_name, Schema *schema, Sql
     char line[1024];
 
     memset(schema, 0, sizeof(*schema));
+    schema->primary_key_index = -1;
 
     if (!build_schema_path(db_root, table_name, path, sizeof(path))) {
         sql_set_error(error, 0, 0, "schema path is too long");
@@ -142,6 +157,12 @@ int load_schema(const char *db_root, const char *table_name, Schema *schema, Sql
                 free_schema(schema);
                 return 0;
             }
+        } else if (strncmp(line, "pkey=", 5) == 0) {
+            if (!parse_primary_key_line(schema, line + 5, error)) {
+                fclose(file);
+                free_schema(schema);
+                return 0;
+            }
         }
     }
 
@@ -157,6 +178,15 @@ int load_schema(const char *db_root, const char *table_name, Schema *schema, Sql
         sql_set_error(error, 0, 0, "schema/table mismatch for `%s`", table_name);
         free_schema(schema);
         return 0;
+    }
+
+    if (schema->primary_key != NULL) {
+        schema->primary_key_index = schema_find_column(schema, schema->primary_key);
+        if (schema->primary_key_index < 0) {
+            sql_set_error(error, 0, 0, "primary key column `%s` not found in schema", schema->primary_key);
+            free_schema(schema);
+            return 0;
+        }
     }
 
     return 1;

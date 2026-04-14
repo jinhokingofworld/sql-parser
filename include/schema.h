@@ -17,6 +17,8 @@ typedef struct {
     char *table_name;
     ColumnDef *columns;
     int column_count;
+    char *primary_key;
+    int primary_key_index;
 } Schema;
 
 int load_schema(const char *db_root, const char *table_name, Schema *schema, SqlError *error);

@@ -46,7 +46,7 @@ static int create_temp_db(char *path, size_t size) {
 
     snprintf(schema_path, sizeof(schema_path), "%s/users.schema", schema_dir);
     snprintf(table_path, sizeof(table_path), "%s/users.csv", table_dir);
-    return write_text_file(schema_path, "table=users\ncolumns=id:int,name:string,age:int\n") &&
+    return write_text_file(schema_path, "table=users\ncolumns=id:int,name:string,age:int\npkey=id\n") &&
         write_text_file(table_path, "1,Alice,20\n2,Bob,31\n");
 }
 
@@ -112,9 +112,30 @@ static char *run_sql(const char *sql, const char *db_root) {
     return buffer;
 }
 
+static int run_sql_expect_failure(const char *sql, const char *db_root, char *buffer, size_t size) {
+    TokenArray tokens = {NULL, 0};
+    QueryList queries = {NULL, 0};
+    SqlError error = {0, 0, {0}};
+    int ok = 0;
+
+    if (tokenize_sql(sql, &tokens, &error) &&
+        parse_queries(&tokens, &queries, &error) &&
+        execute_query_list(&queries, db_root, stdout, &error)) {
+        ok = 0;
+    } else {
+        snprintf(buffer, size, "%s", error.message);
+        ok = 1;
+    }
+
+    free_token_array(&tokens);
+    free_query_list(&queries);
+    return ok;
+}
+
 int main(void) {
     char db_root[1024];
     char *insert_output;
+    char duplicate_error[256] = {0};
     char *select_output;
     int ok = 1;
 
@@ -131,6 +152,15 @@ int main(void) {
         "SELECT name FROM users WHERE age = 31 ORDER BY name;",
         db_root
     );
+    ok &= assert_true(
+        run_sql_expect_failure(
+            "INSERT INTO users (id, name, age) VALUES (2, 'Bobby', 28);",
+            db_root,
+            duplicate_error,
+            sizeof(duplicate_error)
+        ),
+        "duplicate INSERT should fail"
+    );
 
     ok &= assert_true(insert_output != NULL, "INSERT output should exist");
     ok &= assert_true(select_output != NULL, "SELECT output should exist");
@@ -141,6 +171,10 @@ int main(void) {
         ok &= assert_true(strstr(select_output, "Bob") != NULL, "SELECT should include Bob");
         ok &= assert_true(strstr(select_output, "(1 rows)") != NULL, "SELECT row count mismatch");
     }
+    ok &= assert_true(
+        strstr(duplicate_error, "duplicate primary key") != NULL,
+        "duplicate INSERT should report primary key error"
+    );
 
     free(insert_output);
     free(select_output);

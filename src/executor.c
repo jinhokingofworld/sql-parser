@@ -207,6 +207,47 @@ static void print_row(FILE *out, char **values, const size_t *widths, int count)
     fputc('\n', out);
 }
 
+static int ensure_primary_key_unique(
+    const Schema *schema,
+    const char *db_root,
+    char **ordered_fields,
+    SqlError *error
+) {
+    RowSet rowset;
+    int row_index;
+    int ok = 0;
+
+    if (schema->primary_key_index < 0) {
+        return 1;
+    }
+
+    if (!read_csv_rows(db_root, schema->table_name, schema->column_count, &rowset, error)) {
+        return 0;
+    }
+
+    for (row_index = 0; row_index < rowset.row_count; row_index++) {
+        if (strcmp(
+                rowset.rows[row_index].fields[schema->primary_key_index],
+                ordered_fields[schema->primary_key_index]
+            ) == 0) {
+            sql_set_error(
+                error,
+                0,
+                0,
+                "duplicate primary key for column `%s`: `%s`",
+                schema->primary_key,
+                ordered_fields[schema->primary_key_index]
+            );
+            free_rowset(&rowset);
+            return 0;
+        }
+    }
+
+    ok = 1;
+    free_rowset(&rowset);
+    return ok;
+}
+
 static int execute_insert(const InsertQuery *query, const char *db_root, FILE *out, SqlError *error) {
     Schema schema;
     char **ordered_fields = NULL;
@@ -267,6 +308,10 @@ static int execute_insert(const InsertQuery *query, const char *db_root, FILE *o
             sql_set_error(error, 0, 0, "missing value for column `%s`", schema.columns[index].name);
             goto cleanup;
         }
+    }
+
+    if (!ensure_primary_key_unique(&schema, db_root, ordered_fields, error)) {
+        goto cleanup;
     }
 
     if (!append_csv_row(db_root, query->table_name, ordered_fields, schema.column_count, error)) {
