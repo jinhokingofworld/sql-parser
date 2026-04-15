@@ -142,6 +142,42 @@ make test
 - `bptree-contract`
 - `integration`
 
+### `make demo`
+
+발표용 시연 흐름입니다.
+
+```bash
+make demo
+```
+
+무엇을 하느냐:
+
+- 발표용 SQL fixture를 순서대로 실행합니다.
+- 영속 demo DB인 `./data/demo`를 직접 사용합니다.
+- 각 statement마다 `쿼리`, `결과`, `소요시간`을 출력합니다.
+- `SELECT`는 `탐색 방식`, `전체 행 수`, `행 탐색 수`, `인덱스 탐색 단계 수`, `결과 행 수`를 함께 보여줍니다.
+- 다중 statement SQL 파일은 쿼리 블록 사이에 구분선을 출력합니다.
+
+개별 시나리오:
+
+```bash
+make demo-users
+make demo-range
+make demo-fail
+```
+
+구분:
+
+- `make integration`
+  - 개발자용 regression 검증
+- `make demo`
+  - 발표용 terminal demo
+
+주의:
+
+- `make demo*`는 `./data/demo`를 직접 변경하므로 결과가 누적됩니다.
+- integration처럼 임시 fixture DB를 만들지 않습니다.
+
 ## Data Generation And Verification Targets
 
 ### `make gen-small`
@@ -372,6 +408,7 @@ python3 tools/load_students_csv.py --input data/generated/students_1m.csv --db-r
 - `make bptree-contract`
 - `make integration`
 - `make test`
+- `make demo`
 - `make benchmark-run`
 
 파일을 생성하거나 바꾸는 명령:

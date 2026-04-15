@@ -11,6 +11,15 @@ static int g_sort_column_index = 0;
 static ColumnType g_sort_column_type = COLUMN_TYPE_STRING;
 static int g_sort_ascending = 1;
 
+static void clear_query_stats(QueryExecutionStats *stats) {
+    if (stats == NULL) {
+        return;
+    }
+
+    memset(stats, 0, sizeof(*stats));
+    stats->access_path = QUERY_ACCESS_NONE;
+}
+
 static int parse_int_strict(const char *text, long *value) {
     char *end = NULL;
     long parsed;
@@ -198,12 +207,18 @@ static int collect_linear_matches(
     const Schema *schema,
     const RowSet *rowset,
     MatchedRows *matches,
+    QueryExecutionStats *stats,
     SqlError *error
 ) {
     int row_index;
 
     matches->rows = NULL;
     matches->count = 0;
+    if (stats != NULL) {
+        stats->access_path = QUERY_ACCESS_LINEAR;
+        stats->rows_examined = rowset->row_count;
+        stats->index_steps = 0;
+    }
 
     for (row_index = 0; row_index < rowset->row_count; row_index++) {
         int is_match = 1;
@@ -232,10 +247,12 @@ static int collect_indexed_eq_matches(
     const TableState *table,
     const Condition *condition,
     MatchedRows *matches,
+    QueryExecutionStats *stats,
     SqlError *error
 ) {
     long key = 0;
     int row_index = 0;
+    int index_steps = 0;
 
     matches->rows = NULL;
     matches->count = 0;
@@ -247,8 +264,19 @@ static int collect_indexed_eq_matches(
         sql_set_error(error, 0, 0, "type mismatch: column `id` expects int");
         return 0;
     }
-    if (!bptree_search(table->index, (int) key, &row_index)) {
+    if (stats != NULL) {
+        stats->access_path = QUERY_ACCESS_INDEX_EQ;
+    }
+    if (!bptree_search_with_stats(table->index, (int) key, &row_index, &index_steps)) {
+        if (stats != NULL) {
+            stats->rows_examined = 0;
+            stats->index_steps = index_steps;
+        }
         return 1;
+    }
+    if (stats != NULL) {
+        stats->rows_examined = 1;
+        stats->index_steps = index_steps;
     }
 
     return append_match(matches, &table->rowset.rows[row_index], error);
@@ -258,6 +286,7 @@ static int collect_indexed_between_matches(
     const TableState *table,
     const Condition *condition,
     MatchedRows *matches,
+    QueryExecutionStats *stats,
     SqlError *error
 ) {
     long low = 0;
@@ -265,6 +294,7 @@ static int collect_indexed_between_matches(
     int *row_indexes = NULL;
     int row_count = 0;
     int index;
+    int index_steps = 0;
 
     matches->rows = NULL;
     matches->count = 0;
@@ -280,8 +310,23 @@ static int collect_indexed_between_matches(
         sql_set_error(error, 0, 0, "type mismatch: column `id` expects int");
         return 0;
     }
-    if (!bptree_range_search(table->index, (int) low, (int) high, &row_indexes, &row_count, error)) {
+    if (stats != NULL) {
+        stats->access_path = QUERY_ACCESS_INDEX_RANGE;
+    }
+    if (!bptree_range_search_with_stats(
+        table->index,
+        (int) low,
+        (int) high,
+        &row_indexes,
+        &row_count,
+        &index_steps,
+        error
+    )) {
         return 0;
+    }
+    if (stats != NULL) {
+        stats->rows_examined = row_count;
+        stats->index_steps = index_steps;
     }
 
     for (index = 0; index < row_count; index++) {
@@ -300,6 +345,7 @@ static int collect_matches(
     const SelectQuery *query,
     const TableState *table,
     MatchedRows *matches,
+    QueryExecutionStats *stats,
     SqlError *error
 ) {
     int id_index = schema_find_column(&table->schema, "id");
@@ -309,14 +355,14 @@ static int collect_matches(
         sql_stricmp(query->where.column, "id") == 0 &&
         table->index != NULL) {
         if (query->where.type == COND_EQ) {
-            return collect_indexed_eq_matches(table, &query->where, matches, error);
+            return collect_indexed_eq_matches(table, &query->where, matches, stats, error);
         }
         if (query->where.type == COND_BETWEEN) {
-            return collect_indexed_between_matches(table, &query->where, matches, error);
+            return collect_indexed_between_matches(table, &query->where, matches, stats, error);
         }
     }
 
-    return collect_linear_matches(query, &table->schema, &table->rowset, matches, error);
+    return collect_linear_matches(query, &table->schema, &table->rowset, matches, stats, error);
 }
 
 static int prepare_projection(
@@ -376,12 +422,116 @@ static void print_border(FILE *out, const size_t *widths, int count) {
     fputc('\n', out);
 }
 
+static int is_utf8_continuation(unsigned char byte) {
+    return (byte & 0xC0U) == 0x80U;
+}
+
+static size_t decode_utf8_codepoint(const char *text, unsigned int *codepoint) {
+    const unsigned char *bytes = (const unsigned char *) text;
+
+    if (bytes[0] < 0x80U) {
+        *codepoint = bytes[0];
+        return 1;
+    }
+    if ((bytes[0] & 0xE0U) == 0xC0U &&
+        bytes[1] != '\0' &&
+        is_utf8_continuation(bytes[1])) {
+        *codepoint = ((unsigned int) (bytes[0] & 0x1FU) << 6) |
+            (unsigned int) (bytes[1] & 0x3FU);
+        return 2;
+    }
+    if ((bytes[0] & 0xF0U) == 0xE0U &&
+        bytes[1] != '\0' &&
+        bytes[2] != '\0' &&
+        is_utf8_continuation(bytes[1]) &&
+        is_utf8_continuation(bytes[2])) {
+        *codepoint = ((unsigned int) (bytes[0] & 0x0FU) << 12) |
+            ((unsigned int) (bytes[1] & 0x3FU) << 6) |
+            (unsigned int) (bytes[2] & 0x3FU);
+        return 3;
+    }
+    if ((bytes[0] & 0xF8U) == 0xF0U &&
+        bytes[1] != '\0' &&
+        bytes[2] != '\0' &&
+        bytes[3] != '\0' &&
+        is_utf8_continuation(bytes[1]) &&
+        is_utf8_continuation(bytes[2]) &&
+        is_utf8_continuation(bytes[3])) {
+        *codepoint = ((unsigned int) (bytes[0] & 0x07U) << 18) |
+            ((unsigned int) (bytes[1] & 0x3FU) << 12) |
+            ((unsigned int) (bytes[2] & 0x3FU) << 6) |
+            (unsigned int) (bytes[3] & 0x3FU);
+        return 4;
+    }
+
+    *codepoint = bytes[0];
+    return 1;
+}
+
+static size_t codepoint_display_width(unsigned int codepoint) {
+    if (codepoint == 0U ||
+        codepoint < 0x20U ||
+        (codepoint >= 0x7FU && codepoint < 0xA0U) ||
+        (codepoint >= 0x0300U && codepoint <= 0x036FU) ||
+        (codepoint >= 0x1AB0U && codepoint <= 0x1AFFU) ||
+        (codepoint >= 0x1DC0U && codepoint <= 0x1DFFU) ||
+        (codepoint >= 0x20D0U && codepoint <= 0x20FFU) ||
+        (codepoint >= 0xFE20U && codepoint <= 0xFE2FU)) {
+        return 0U;
+    }
+
+    if ((codepoint >= 0x1100U && codepoint <= 0x115FU) ||
+        codepoint == 0x2329U ||
+        codepoint == 0x232AU ||
+        (codepoint >= 0x2E80U && codepoint <= 0x303EU) ||
+        (codepoint >= 0x3040U && codepoint <= 0xA4CFU) ||
+        (codepoint >= 0xAC00U && codepoint <= 0xD7A3U) ||
+        (codepoint >= 0xF900U && codepoint <= 0xFAFFU) ||
+        (codepoint >= 0xFE10U && codepoint <= 0xFE19U) ||
+        (codepoint >= 0xFE30U && codepoint <= 0xFE6FU) ||
+        (codepoint >= 0xFF00U && codepoint <= 0xFF60U) ||
+        (codepoint >= 0xFFE0U && codepoint <= 0xFFE6U) ||
+        (codepoint >= 0x20000U && codepoint <= 0x2FFFD) ||
+        (codepoint >= 0x30000U && codepoint <= 0x3FFFD)) {
+        return 2U;
+    }
+
+    return 1U;
+}
+
+static size_t sql_display_width(const char *text) {
+    size_t width = 0U;
+
+    while (*text != '\0') {
+        unsigned int codepoint = 0U;
+        size_t consumed = decode_utf8_codepoint(text, &codepoint);
+
+        width += codepoint_display_width(codepoint);
+        text += consumed;
+    }
+
+    return width;
+}
+
+static void print_padding(FILE *out, size_t count) {
+    size_t index;
+
+    for (index = 0U; index < count; index++) {
+        fputc(' ', out);
+    }
+}
+
 static void print_row(FILE *out, char **values, const size_t *widths, int count) {
     int index;
 
     fputc('|', out);
     for (index = 0; index < count; index++) {
-        fprintf(out, " %-*s |", (int) widths[index], values[index]);
+        size_t visible_width = sql_display_width(values[index]);
+
+        fputc(' ', out);
+        fputs(values[index], out);
+        print_padding(out, widths[index] > visible_width ? widths[index] - visible_width : 0U);
+        fputs(" |", out);
     }
     fputc('\n', out);
 }
@@ -512,7 +662,13 @@ cleanup:
     return ok;
 }
 
-static int execute_select(const SelectQuery *query, DbContext *ctx, FILE *out, SqlError *error) {
+static int execute_select(
+    const SelectQuery *query,
+    DbContext *ctx,
+    FILE *out,
+    QueryExecutionStats *stats,
+    SqlError *error
+) {
     TableState *table = db_context_find_table(ctx, query->table_name);
     MatchedRows matches;
     int *selected_indexes = NULL;
@@ -526,10 +682,15 @@ static int execute_select(const SelectQuery *query, DbContext *ctx, FILE *out, S
         sql_set_error(error, 0, 0, "unknown table `%s`", query->table_name);
         return 0;
     }
+    clear_query_stats(stats);
+    if (stats != NULL) {
+        stats->has_select_stats = 1;
+        stats->total_rows = table->rowset.row_count;
+    }
     if (!prepare_projection(query, &table->schema, &selected_indexes, &selected_count, error)) {
         return 0;
     }
-    if (!collect_matches(query, table, &matches, error)) {
+    if (!collect_matches(query, table, &matches, stats, error)) {
         free(selected_indexes);
         return 0;
     }
@@ -555,14 +716,14 @@ static int execute_select(const SelectQuery *query, DbContext *ctx, FILE *out, S
 
     for (index = 0; index < selected_count; index++) {
         header_values[index] = table->schema.columns[selected_indexes[index]].name;
-        widths[index] = strlen(header_values[index]);
+        widths[index] = sql_display_width(header_values[index]);
     }
 
     for (index = 0; index < matches.count; index++) {
         int column_index;
 
         for (column_index = 0; column_index < selected_count; column_index++) {
-            size_t cell_len = strlen(matches.rows[index]->fields[selected_indexes[column_index]]);
+            size_t cell_len = sql_display_width(matches.rows[index]->fields[selected_indexes[column_index]]);
             if (cell_len > widths[column_index]) {
                 widths[column_index] = cell_len;
             }
@@ -588,6 +749,9 @@ static int execute_select(const SelectQuery *query, DbContext *ctx, FILE *out, S
     }
     print_border(out, widths, selected_count);
     fprintf(out, "(%d rows)\n", matches.count);
+    if (stats != NULL) {
+        stats->result_rows = matches.count;
+    }
     ok = 1;
 
 cleanup:
@@ -599,23 +763,50 @@ cleanup:
 }
 
 int execute_query(const Query *query, DbContext *ctx, FILE *out, SqlError *error) {
+    return execute_query_with_stats(query, ctx, out, NULL, error);
+}
+
+int execute_query_with_stats(
+    const Query *query,
+    DbContext *ctx,
+    FILE *out,
+    QueryExecutionStats *stats,
+    SqlError *error
+) {
     error->message[0] = '\0';
+    clear_query_stats(stats);
 
     if (query->type == QUERY_INSERT) {
         return execute_insert(&query->insert_query, ctx, out, error);
     }
 
-    return execute_select(&query->select_query, ctx, out, error);
+    return execute_select(&query->select_query, ctx, out, stats, error);
 }
 
 int execute_query_list(const QueryList *queries, DbContext *ctx, FILE *out, SqlError *error) {
+    return execute_query_list_with_stats(queries, ctx, out, NULL, error);
+}
+
+int execute_query_list_with_stats(
+    const QueryList *queries,
+    DbContext *ctx,
+    FILE *out,
+    QueryExecutionStats *stats_list,
+    SqlError *error
+) {
     int index;
 
     for (index = 0; index < queries->count; index++) {
         if (index > 0) {
             fputc('\n', out);
         }
-        if (!execute_query(queries->items[index], ctx, out, error)) {
+        if (!execute_query_with_stats(
+            queries->items[index],
+            ctx,
+            out,
+            stats_list != NULL ? &stats_list[index] : NULL,
+            error
+        )) {
             return 0;
         }
     }

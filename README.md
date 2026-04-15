@@ -173,6 +173,39 @@ VALUES ('Dana', 2, 21, 'Seoul', 4.10);
 SELECT id, name FROM users ORDER BY id;
 ```
 
+## 터미널 데모 빠른 시작
+
+발표나 시연에서는 `make demo` 계열을 먼저 사용하는 흐름을 권장합니다. 이 경로는 영속 demo DB인 `./data/demo`를 기준으로, 실제 SQL 본문과 쿼리별 `결과`, `소요시간`, `탐색 지표`를 한 번에 보여주도록 정리되어 있어 쿼리 파일을 따로 열지 않고도 설명할 수 있습니다.
+
+```bash
+make
+make demo
+```
+
+개별 시나리오만 보고 싶을 때:
+
+```bash
+make demo-users
+make demo-range
+make demo-fail
+```
+
+구성:
+
+- `make demo`
+  - 영속 `data/demo` 기준으로 auto-increment, `BETWEEN`, reserved `id` 실패 시나리오를 순서대로 실행
+- `make demo-users`
+  - auto-increment INSERT 뒤에 인덱스 단건 조회와 선형 탐색을 비교
+- `make demo-range`
+  - `WHERE id BETWEEN ...` 인덱스 범위 조회를 확인
+- `make demo-fail`
+  - `id` 수동 입력 금지 에러 메시지를 확인
+
+주의:
+
+- `make demo*`는 `./data/demo`를 직접 사용하므로 실행 결과가 누적됩니다.
+- 기준 시연 데이터를 바꾸고 싶으면 `data/demo/schema/`, `data/demo/tables/` 아래 파일을 직접 편집하면 됩니다.
+
 ## CLI 사용법
 
 권장 실행 형식:
@@ -233,6 +266,12 @@ make integration
 
 ```bash
 make test
+```
+
+발표용 데모:
+
+```bash
+make demo
 ```
 
 devcontainer 기준 검증:

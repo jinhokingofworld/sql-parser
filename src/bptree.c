@@ -241,10 +241,20 @@ static int bptree_insert_recursive(
     }
 }
 
-static const BPTreeNode *bptree_find_leaf(const BPTree *tree, int key) {
-    const BPTreeNode *node = tree->root;
+static const BPTreeNode *bptree_find_leaf_with_steps(const BPTree *tree, int key, int *steps) {
+    const BPTreeNode *node = tree != NULL ? tree->root : NULL;
 
-    while (node != NULL && !node->is_leaf) {
+    if (steps != NULL) {
+        *steps = 0;
+    }
+
+    while (node != NULL) {
+        if (steps != NULL) {
+            (*steps)++;
+        }
+        if (node->is_leaf) {
+            break;
+        }
         node = node->children[bptree_internal_child_index(node, key)];
     }
 
@@ -343,6 +353,10 @@ int bptree_insert(BPTree *tree, int key, int row_index, SqlError *error) {
 }
 
 int bptree_search(const BPTree *tree, int key, int *row_index) {
+    return bptree_search_with_stats(tree, key, row_index, NULL);
+}
+
+int bptree_search_with_stats(const BPTree *tree, int key, int *row_index, int *out_steps) {
     const BPTreeNode *leaf;
     int index;
 
@@ -350,10 +364,13 @@ int bptree_search(const BPTree *tree, int key, int *row_index) {
         *row_index = 0;
     }
     if (tree == NULL || tree->root == NULL) {
+        if (out_steps != NULL) {
+            *out_steps = 0;
+        }
         return 0;
     }
 
-    leaf = bptree_find_leaf(tree, key);
+    leaf = bptree_find_leaf_with_steps(tree, key, out_steps);
     if (leaf == NULL) {
         return 0;
     }
@@ -377,6 +394,18 @@ int bptree_range_search(
     int *out_count,
     SqlError *error
 ) {
+    return bptree_range_search_with_stats(tree, min_key, max_key, out_indexes, out_count, NULL, error);
+}
+
+int bptree_range_search_with_stats(
+    const BPTree *tree,
+    int min_key,
+    int max_key,
+    int **out_indexes,
+    int *out_count,
+    int *out_steps,
+    SqlError *error
+) {
     const BPTreeNode *leaf;
     int *indexes = NULL;
     int count = 0;
@@ -385,15 +414,21 @@ int bptree_range_search(
 
     *out_indexes = NULL;
     *out_count = 0;
+    if (out_steps != NULL) {
+        *out_steps = 0;
+    }
 
     if (tree == NULL || tree->root == NULL || min_key > max_key) {
         return 1;
     }
 
-    leaf = bptree_find_leaf(tree, min_key);
+    leaf = bptree_find_leaf_with_steps(tree, min_key, out_steps);
     while (leaf != NULL) {
         int index = first_leaf ? bptree_leaf_lower_bound(leaf, min_key) : 0;
 
+        if (!first_leaf && out_steps != NULL) {
+            (*out_steps)++;
+        }
         first_leaf = 0;
         while (index < leaf->key_count) {
             if (leaf->keys[index] > max_key) {
