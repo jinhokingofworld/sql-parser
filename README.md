@@ -266,3 +266,35 @@ make integration
 ```bash
 make test
 ```
+
+## Student Demo Data Pipeline
+
+The student demo now uses a single student identifier.
+
+- `id`: student number itself, and also the primary key used by the B+ tree
+
+Current student table schema:
+
+```text
+table=students
+columns=id:int,name:string,grade:int,age:int,region:string,score:float
+pkey=id
+```
+
+Generated CSV input format:
+
+```text
+id,name,grade,age,region,score
+```
+
+Useful commands:
+
+```bash
+py -3 -m pip install -r requirements.txt
+py -3 tools/generate_students_csv.py --rows 10 --output data/generated/students_sample10.csv --seed 42
+py -3 tools/load_students_csv.py --input data/generated/students_sample10.csv --db-root data --table students --truncate
+py -3 tools/load_students_sql.py --input data/generated/students_sample10.csv --db-root data --sql-processor .\sql_processor.exe --truncate --batch-size 100
+cmd /c demo\run_students_demo.cmd
+```
+
+If your machine does not provide `py -3`, replace it with the Python 3 command available in your environment.

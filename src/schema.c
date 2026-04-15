@@ -89,6 +89,20 @@ static int parse_primary_key_line(Schema *schema, const char *line, SqlError *er
     return 1;
 }
 
+static int parse_autoincrement_line(Schema *schema, const char *line, SqlError *error) {
+    if (sql_stricmp(line, "true") == 0) {
+        schema->autoincrement = 1;
+        return 1;
+    }
+    if (sql_stricmp(line, "false") == 0) {
+        schema->autoincrement = 0;
+        return 1;
+    }
+
+    sql_set_error(error, 0, 0, "invalid autoincrement value `%s`", line);
+    return 0;
+}
+
 /* Releases schema metadata loaded from the on-disk `.schema` file. */
 void free_schema(Schema *schema) {
     int index;
@@ -109,6 +123,7 @@ void free_schema(Schema *schema) {
     schema->columns = NULL;
     schema->column_count = 0;
     schema->primary_key_index = -1;
+    schema->autoincrement = 0;
 }
 
 /* Finds a column index by name so executor logic can stay schema-driven. */
@@ -163,6 +178,12 @@ int load_schema(const char *db_root, const char *table_name, Schema *schema, Sql
             }
         } else if (strncmp(line, "pkey=", 5) == 0) {
             if (!parse_primary_key_line(schema, line + 5, error)) {
+                fclose(file);
+                free_schema(schema);
+                return 0;
+            }
+        } else if (strncmp(line, "autoincrement=", 14) == 0) {
+            if (!parse_autoincrement_line(schema, line + 14, error)) {
                 fclose(file);
                 free_schema(schema);
                 return 0;

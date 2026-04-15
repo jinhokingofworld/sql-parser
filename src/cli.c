@@ -5,7 +5,9 @@ void print_usage(FILE *out, const char *program_name) {
     fprintf(
         out,
         "Usage: %s [--sql <file>] [--db <path>] [--explain]\n"
+        "       %s --bench <rows> [--db <path>]\n"
         "       %s <sql-file>\n",
+        program_name,
         program_name,
         program_name
     );
@@ -18,6 +20,7 @@ int parse_cli_args(int argc, char **argv, CliOptions *options, SqlError *error) 
     options->sql_path = NULL;
     options->db_root = "./data";
     options->explain = 0;
+    options->bench_rows = 0;
 
     for (index = 1; index < argc; index++) {
         if (strcmp(argv[index], "--sql") == 0) {
@@ -34,6 +37,23 @@ int parse_cli_args(int argc, char **argv, CliOptions *options, SqlError *error) 
             options->db_root = argv[++index];
         } else if (strcmp(argv[index], "--explain") == 0) {
             options->explain = 1;
+        } else if (strcmp(argv[index], "--bench") == 0) {
+            char *end = NULL;
+            long parsed = 0;
+
+            if (index + 1 >= argc) {
+                sql_set_error(error, 0, 0, "`--bench` requires a row count");
+                return 0;
+            }
+
+            errno = 0;
+            parsed = strtol(argv[++index], &end, 10);
+            if (errno != 0 || end == argv[index] || *end != '\0' || parsed <= 0 || parsed > INT_MAX) {
+                sql_set_error(error, 0, 0, "`--bench` requires a positive integer row count");
+                return 0;
+            }
+
+            options->bench_rows = (int) parsed;
         } else if (argv[index][0] == '-') {
             sql_set_error(error, 0, 0, "unknown option `%s`", argv[index]);
             return 0;
@@ -45,7 +65,7 @@ int parse_cli_args(int argc, char **argv, CliOptions *options, SqlError *error) 
         }
     }
 
-    if (options->sql_path == NULL) {
+    if (options->sql_path == NULL && options->bench_rows <= 0) {
         sql_set_error(error, 0, 0, "missing SQL file path");
         return 0;
     }

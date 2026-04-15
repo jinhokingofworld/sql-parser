@@ -11,10 +11,13 @@ static int assert_true(int condition, const char *message) {
 int main(void) {
     const char *sql = "SeLeCt id, name FROM users WHERE age = 20 ORDER BY name;";
     const char *float_sql = "INSERT INTO students (score) VALUES (4.5);";
+    const char *between_sql = "SELECT * FROM students WHERE id BETWEEN 10 AND 20;";
     TokenArray tokens = {NULL, 0};
     TokenArray float_tokens = {NULL, 0};
+    TokenArray between_tokens = {NULL, 0};
     SqlError error = {0, 0, {0}};
     int float_index = -1;
+    int between_keyword_index = -1;
     int index;
 
     if (!tokenize_sql(sql, &tokens, &error)) {
@@ -63,7 +66,30 @@ int main(void) {
         return 1;
     }
 
+    if (!tokenize_sql(between_sql, &between_tokens, &error)) {
+        fprintf(stderr, "tokenize_sql between_sql failed: %s\n", error.message);
+        free_token_array(&tokens);
+        free_token_array(&float_tokens);
+        return 1;
+    }
+
+    for (index = 0; index < between_tokens.count; index++) {
+        if (between_tokens.items[index].type == TOKEN_KEYWORD &&
+            strcmp(between_tokens.items[index].lexeme, "BETWEEN") == 0) {
+            between_keyword_index = index;
+            break;
+        }
+    }
+
+    if (!assert_true(between_keyword_index >= 0, "BETWEEN should be tokenized as keyword")) {
+        free_token_array(&tokens);
+        free_token_array(&float_tokens);
+        free_token_array(&between_tokens);
+        return 1;
+    }
+
     free_token_array(&tokens);
     free_token_array(&float_tokens);
+    free_token_array(&between_tokens);
     return 0;
 }

@@ -1,1 +1,6 @@
 .DS_Store
+*.exe
+tmp-sql-parser-*/
+__pycache__/
+*.pyc
+data/generated/

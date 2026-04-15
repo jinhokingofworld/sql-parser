@@ -7,6 +7,13 @@ typedef struct {
     int count;
 } MatchedRows;
 
+typedef enum {
+    INDEX_LOOKUP_NONE,
+    INDEX_LOOKUP_EQ,
+    INDEX_LOOKUP_RANGE,
+    INDEX_LOOKUP_ERROR
+} IndexLookupType;
+
 static int g_sort_column_index = 0;
 static ColumnType g_sort_column_type = COLUMN_TYPE_STRING;
 static int g_sort_ascending = 1;
@@ -100,6 +107,22 @@ static int compare_field_values(const char *left, const char *right, ColumnType 
     return strcmp(left, right);
 }
 
+static int append_match(MatchedRows *matches, Row *row, SqlError *error) {
+    Row **next_rows = realloc(matches->rows, sizeof(Row *) * (size_t) (matches->count + 1));
+
+    if (next_rows == NULL) {
+        sql_set_error(error, 0, 0, "out of memory while filtering rows");
+        free(matches->rows);
+        matches->rows = NULL;
+        matches->count = 0;
+        return 0;
+    }
+
+    matches->rows = next_rows;
+    matches->rows[matches->count++] = row;
+    return 1;
+}
+
 static int row_matches_condition(const Row *row, const Schema *schema, const Condition *condition, SqlError *error) {
     int column_index = schema_find_column(schema, condition->column);
     ColumnType type;
@@ -110,6 +133,26 @@ static int row_matches_condition(const Row *row, const Schema *schema, const Con
     }
 
     type = schema->columns[column_index].type;
+    if (condition->type == COND_BETWEEN) {
+        if (!is_value_compatible(type, &condition->low) || !is_value_compatible(type, &condition->high)) {
+            sql_set_error(
+                error,
+                0,
+                0,
+                "type mismatch: column `%s` expects %s",
+                condition->column,
+                column_type_label(type)
+            );
+            return 0;
+        }
+        if (compare_field_values(condition->low.raw, condition->high.raw, type) > 0) {
+            return 0;
+        }
+
+        return compare_field_values(row->fields[column_index], condition->low.raw, type) >= 0 &&
+            compare_field_values(row->fields[column_index], condition->high.raw, type) <= 0;
+    }
+
     if (!is_value_compatible(type, &condition->value)) {
         sql_set_error(
             error,
@@ -143,7 +186,51 @@ static void free_matched_rows(MatchedRows *matches) {
     matches->count = 0;
 }
 
-static int collect_matches(
+static IndexLookupType classify_index_lookup(
+    const TableState *table,
+    const SelectQuery *query,
+    int *min_key,
+    int *max_key,
+    SqlError *error
+) {
+    long parsed = 0;
+    long low = 0;
+    long high = 0;
+
+    *min_key = 0;
+    *max_key = 0;
+
+    if (!query->has_where || table->index == NULL || table->id_column_index < 0) {
+        return INDEX_LOOKUP_NONE;
+    }
+    if (sql_stricmp(query->where.column, "id") != 0) {
+        return INDEX_LOOKUP_NONE;
+    }
+
+    if (query->where.type == COND_BETWEEN) {
+        if (query->where.low.type != VALUE_INT || query->where.high.type != VALUE_INT ||
+            !parse_int_strict(query->where.low.raw, &low) ||
+            !parse_int_strict(query->where.high.raw, &high)) {
+            sql_set_error(error, 0, 0, "type mismatch: column `id` expects int");
+            return INDEX_LOOKUP_ERROR;
+        }
+
+        *min_key = (int) low;
+        *max_key = (int) high;
+        return INDEX_LOOKUP_RANGE;
+    }
+
+    if (query->where.value.type != VALUE_INT || !parse_int_strict(query->where.value.raw, &parsed)) {
+        sql_set_error(error, 0, 0, "type mismatch: column `id` expects int");
+        return INDEX_LOOKUP_ERROR;
+    }
+
+    *min_key = (int) parsed;
+    *max_key = (int) parsed;
+    return INDEX_LOOKUP_EQ;
+}
+
+static int collect_linear_matches(
     const SelectQuery *query,
     const Schema *schema,
     const RowSet *rowset,
@@ -152,38 +239,96 @@ static int collect_matches(
 ) {
     int row_index;
 
-    matches->rows = NULL;
-    matches->count = 0;
-
     for (row_index = 0; row_index < rowset->row_count; row_index++) {
         int is_match = 1;
-        Row **next_rows;
 
         if (query->has_where) {
             is_match = row_matches_condition(&rowset->rows[row_index], schema, &query->where, error);
             if (!is_match && error->message[0] != '\0') {
-                free_matched_rows(matches);
                 return 0;
             }
         }
 
-        if (!is_match) {
-            continue;
-        }
-
-        next_rows = realloc(matches->rows, sizeof(Row *) * (size_t) (matches->count + 1));
-        if (next_rows == NULL) {
-            sql_set_error(error, 0, 0, "out of memory while filtering rows");
-            free_matched_rows(matches);
+        if (is_match && !append_match(matches, &rowset->rows[row_index], error)) {
             return 0;
         }
-
-        matches->rows = next_rows;
-        matches->rows[matches->count] = &rowset->rows[row_index];
-        matches->count++;
     }
 
     return 1;
+}
+
+static int collect_index_matches(
+    const TableState *table,
+    IndexLookupType lookup_type,
+    int min_key,
+    int max_key,
+    MatchedRows *matches,
+    SqlError *error
+) {
+    if (lookup_type == INDEX_LOOKUP_EQ) {
+        int row_index = -1;
+
+        if (!bptree_search(table->index, min_key, &row_index)) {
+            return 1;
+        }
+        if (row_index < 0 || row_index >= table->rowset.row_count) {
+            sql_set_error(error, 0, 0, "corrupted B+ tree row index");
+            return 0;
+        }
+
+        return append_match(matches, &table->rowset.rows[row_index], error);
+    }
+
+    if (lookup_type == INDEX_LOOKUP_RANGE) {
+        int *indexes = NULL;
+        int count = 0;
+        int index;
+
+        if (!bptree_range_search(table->index, min_key, max_key, &indexes, &count, error)) {
+            return 0;
+        }
+
+        for (index = 0; index < count; index++) {
+            if (indexes[index] < 0 || indexes[index] >= table->rowset.row_count) {
+                free(indexes);
+                sql_set_error(error, 0, 0, "corrupted B+ tree row index");
+                return 0;
+            }
+            if (!append_match(matches, &table->rowset.rows[indexes[index]], error)) {
+                free(indexes);
+                return 0;
+            }
+        }
+
+        free(indexes);
+        return 1;
+    }
+
+    return 1;
+}
+
+static int collect_matches(
+    const SelectQuery *query,
+    const TableState *table,
+    MatchedRows *matches,
+    SqlError *error
+) {
+    int min_key = 0;
+    int max_key = 0;
+    IndexLookupType lookup_type;
+
+    matches->rows = NULL;
+    matches->count = 0;
+
+    lookup_type = classify_index_lookup(table, query, &min_key, &max_key, error);
+    if (lookup_type == INDEX_LOOKUP_ERROR) {
+        return 0;
+    }
+    if (lookup_type != INDEX_LOOKUP_NONE) {
+        return collect_index_matches(table, lookup_type, min_key, max_key, matches, error);
+    }
+
+    return collect_linear_matches(query, &table->schema, &table->rowset, matches, error);
 }
 
 static int prepare_projection(
@@ -253,73 +398,30 @@ static void print_row(FILE *out, char **values, const size_t *widths, int count)
     fputc('\n', out);
 }
 
-static int ensure_primary_key_unique(
-    const Schema *schema,
-    const char *db_root,
-    char **ordered_fields,
-    SqlError *error
-) {
-    RowSet rowset;
-    int row_index;
-    int ok = 0;
-
-    if (schema->primary_key_index < 0) {
-        return 1;
-    }
-
-    if (!read_csv_rows(db_root, schema->table_name, schema->column_count, &rowset, error)) {
-        return 0;
-    }
-
-    for (row_index = 0; row_index < rowset.row_count; row_index++) {
-        if (strcmp(
-                rowset.rows[row_index].fields[schema->primary_key_index],
-                ordered_fields[schema->primary_key_index]
-            ) == 0) {
-            sql_set_error(
-                error,
-                0,
-                0,
-                "duplicate primary key for column `%s`: `%s`",
-                schema->primary_key,
-                ordered_fields[schema->primary_key_index]
-            );
-            free_rowset(&rowset);
-            return 0;
-        }
-    }
-
-    ok = 1;
-    free_rowset(&rowset);
-    return ok;
-}
-
-static int execute_insert(const InsertQuery *query, const char *db_root, FILE *out, SqlError *error) {
-    Schema schema;
+static int execute_insert(const InsertQuery *query, DbContext *ctx, FILE *out, SqlError *error) {
+    TableState *table = db_context_find_table(ctx, query->table_name);
+    Schema *schema;
     char **ordered_fields = NULL;
     int *seen = NULL;
     int index;
     int ok = 0;
 
-    if (!load_schema(db_root, query->table_name, &schema, error)) {
+    if (table == NULL) {
+        sql_set_error(error, 0, 0, "unknown table `%s`", query->table_name);
         return 0;
     }
 
-    if (query->column_count != schema.column_count) {
-        sql_set_error(error, 0, 0, "INSERT must provide exactly %d columns", schema.column_count);
-        free_schema(&schema);
-        return 0;
-    }
+    schema = &table->schema;
 
-    ordered_fields = calloc((size_t) schema.column_count, sizeof(char *));
-    seen = calloc((size_t) schema.column_count, sizeof(int));
+    ordered_fields = calloc((size_t) schema->column_count, sizeof(char *));
+    seen = calloc((size_t) schema->column_count, sizeof(int));
     if (ordered_fields == NULL || seen == NULL) {
         sql_set_error(error, 0, 0, "out of memory while executing INSERT");
         goto cleanup;
     }
 
     for (index = 0; index < query->column_count; index++) {
-        int schema_index = schema_find_column(&schema, query->columns[index]);
+        int schema_index = schema_find_column(schema, query->columns[index]);
 
         if (schema_index < 0) {
             sql_set_error(error, 0, 0, "unknown column `%s`", query->columns[index]);
@@ -329,14 +431,24 @@ static int execute_insert(const InsertQuery *query, const char *db_root, FILE *o
             sql_set_error(error, 0, 0, "duplicate column `%s`", query->columns[index]);
             goto cleanup;
         }
-        if (!is_value_compatible(schema.columns[schema_index].type, &query->values[index])) {
+        if (schema->autoincrement && schema_index == schema->primary_key_index) {
+            sql_set_error(
+                error,
+                0,
+                0,
+                "column `%s` is reserved and cannot be specified manually",
+                schema->columns[schema_index].name
+            );
+            goto cleanup;
+        }
+        if (!is_value_compatible(schema->columns[schema_index].type, &query->values[index])) {
             sql_set_error(
                 error,
                 0,
                 0,
                 "type mismatch: column `%s` expects %s",
                 query->columns[index],
-                column_type_label(schema.columns[schema_index].type)
+                column_type_label(schema->columns[schema_index].type)
             );
             goto cleanup;
         }
@@ -349,18 +461,27 @@ static int execute_insert(const InsertQuery *query, const char *db_root, FILE *o
         seen[schema_index] = 1;
     }
 
-    for (index = 0; index < schema.column_count; index++) {
+    for (index = 0; index < schema->column_count; index++) {
         if (!seen[index]) {
-            sql_set_error(error, 0, 0, "missing value for column `%s`", schema.columns[index].name);
+            if (schema->autoincrement && index == schema->primary_key_index) {
+                char id_buffer[64];
+
+                snprintf(id_buffer, sizeof(id_buffer), "%d", table->next_id);
+                ordered_fields[index] = sql_strdup(id_buffer);
+                if (ordered_fields[index] == NULL) {
+                    sql_set_error(error, 0, 0, "out of memory while generating auto-increment id");
+                    goto cleanup;
+                }
+                seen[index] = 1;
+                continue;
+            }
+
+            sql_set_error(error, 0, 0, "missing value for column `%s`", schema->columns[index].name);
             goto cleanup;
         }
     }
 
-    if (!ensure_primary_key_unique(&schema, db_root, ordered_fields, error)) {
-        goto cleanup;
-    }
-
-    if (!append_csv_row(db_root, query->table_name, ordered_fields, schema.column_count, error)) {
+    if (!db_context_insert_row(ctx, query->table_name, ordered_fields, error)) {
         goto cleanup;
     }
 
@@ -369,19 +490,18 @@ static int execute_insert(const InsertQuery *query, const char *db_root, FILE *o
 
 cleanup:
     if (ordered_fields != NULL) {
-        for (index = 0; index < schema.column_count; index++) {
+        for (index = 0; index < schema->column_count; index++) {
             free(ordered_fields[index]);
         }
     }
     free(ordered_fields);
     free(seen);
-    free_schema(&schema);
     return ok;
 }
 
-static int execute_select(const SelectQuery *query, const char *db_root, FILE *out, SqlError *error) {
-    Schema schema;
-    RowSet rowset;
+static int execute_select(const SelectQuery *query, DbContext *ctx, FILE *out, SqlError *error) {
+    TableState *table = db_context_find_table(ctx, query->table_name);
+    Schema *schema;
     MatchedRows matches;
     int *selected_indexes = NULL;
     int selected_count = 0;
@@ -390,33 +510,28 @@ static int execute_select(const SelectQuery *query, const char *db_root, FILE *o
     int index;
     int ok = 0;
 
-    if (!load_schema(db_root, query->table_name, &schema, error)) {
+    if (table == NULL) {
+        sql_set_error(error, 0, 0, "unknown table `%s`", query->table_name);
         return 0;
     }
-    if (!read_csv_rows(db_root, query->table_name, schema.column_count, &rowset, error)) {
-        free_schema(&schema);
+
+    schema = &table->schema;
+    if (!prepare_projection(query, schema, &selected_indexes, &selected_count, error)) {
         return 0;
     }
-    if (!prepare_projection(query, &schema, &selected_indexes, &selected_count, error)) {
-        free_rowset(&rowset);
-        free_schema(&schema);
-        return 0;
-    }
-    if (!collect_matches(query, &schema, &rowset, &matches, error)) {
+    if (!collect_matches(query, table, &matches, error)) {
         free(selected_indexes);
-        free_rowset(&rowset);
-        free_schema(&schema);
         return 0;
     }
 
     if (query->has_order_by) {
-        int order_index = schema_find_column(&schema, query->order_by.column);
+        int order_index = schema_find_column(schema, query->order_by.column);
         if (order_index < 0) {
             sql_set_error(error, 0, 0, "unknown column `%s`", query->order_by.column);
             goto cleanup;
         }
         g_sort_column_index = order_index;
-        g_sort_column_type = schema.columns[order_index].type;
+        g_sort_column_type = schema->columns[order_index].type;
         g_sort_ascending = query->order_by.ascending;
         qsort(matches.rows, (size_t) matches.count, sizeof(Row *), qsort_row_compare);
     }
@@ -429,7 +544,7 @@ static int execute_select(const SelectQuery *query, const char *db_root, FILE *o
     }
 
     for (index = 0; index < selected_count; index++) {
-        header_values[index] = schema.columns[selected_indexes[index]].name;
+        header_values[index] = schema->columns[selected_indexes[index]].name;
         widths[index] = strlen(header_values[index]);
     }
 
@@ -469,31 +584,29 @@ cleanup:
     free(header_values);
     free(selected_indexes);
     free_matched_rows(&matches);
-    free_rowset(&rowset);
-    free_schema(&schema);
     return ok;
 }
 
 /* Executes a single parsed query against the file-based database root. */
-int execute_query(const Query *query, const char *db_root, FILE *out, SqlError *error) {
+int execute_query(const Query *query, DbContext *ctx, FILE *out, SqlError *error) {
     error->message[0] = '\0';
 
     if (query->type == QUERY_INSERT) {
-        return execute_insert(&query->insert_query, db_root, out, error);
+        return execute_insert(&query->insert_query, ctx, out, error);
     }
 
-    return execute_select(&query->select_query, db_root, out, error);
+    return execute_select(&query->select_query, ctx, out, error);
 }
 
 /* Executes all parsed statements in order so one SQL file can drive a workflow. */
-int execute_query_list(const QueryList *queries, const char *db_root, FILE *out, SqlError *error) {
+int execute_query_list(const QueryList *queries, DbContext *ctx, FILE *out, SqlError *error) {
     int index;
 
     for (index = 0; index < queries->count; index++) {
         if (index > 0) {
             fputc('\n', out);
         }
-        if (!execute_query(queries->items[index], db_root, out, error)) {
+        if (!execute_query(queries->items[index], ctx, out, error)) {
             return 0;
         }
     }

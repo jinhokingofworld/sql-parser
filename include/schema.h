@@ -20,6 +20,7 @@ typedef struct {
     int column_count;
     char *primary_key;
     int primary_key_index;
+    int autoincrement;
 } Schema;
 
 int load_schema(const char *db_root, const char *table_name, Schema *schema, SqlError *error);

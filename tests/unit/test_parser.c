@@ -13,10 +13,13 @@ int main(void) {
         "INSERT INTO users (id, name, age) VALUES (1, 'Alice', 20);"
         "SELECT id, name FROM users WHERE age = 20 ORDER BY name;";
     const char *float_sql = "SELECT score FROM students WHERE score = 3.75;";
+    const char *between_sql = "SELECT id FROM students WHERE id BETWEEN 10 AND 20;";
     TokenArray tokens = {NULL, 0};
     TokenArray float_tokens = {NULL, 0};
+    TokenArray between_tokens = {NULL, 0};
     QueryList queries = {NULL, 0};
     QueryList float_queries = {NULL, 0};
+    QueryList between_queries = {NULL, 0};
     SqlError error = {0, 0, {0}};
     int ok = 1;
 
@@ -65,6 +68,41 @@ int main(void) {
         "float WHERE value raw mismatch"
     );
 
+    if (!tokenize_sql(between_sql, &between_tokens, &error)) {
+        fprintf(stderr, "tokenize_sql between_sql failed: %s\n", error.message);
+        free_query_list(&float_queries);
+        free_token_array(&float_tokens);
+        free_query_list(&queries);
+        free_token_array(&tokens);
+        return 1;
+    }
+
+    if (!parse_queries(&between_tokens, &between_queries, &error)) {
+        fprintf(stderr, "parse_queries between_sql failed: %s\n", error.message);
+        free_query_list(&float_queries);
+        free_token_array(&float_tokens);
+        free_query_list(&queries);
+        free_token_array(&tokens);
+        free_token_array(&between_tokens);
+        return 1;
+    }
+
+    ok &= assert_true(between_queries.count == 1, "expected one BETWEEN statement");
+    ok &= assert_true(
+        between_queries.items[0]->select_query.where.type == COND_BETWEEN,
+        "BETWEEN WHERE type mismatch"
+    );
+    ok &= assert_true(
+        strcmp(between_queries.items[0]->select_query.where.low.raw, "10") == 0,
+        "BETWEEN low value mismatch"
+    );
+    ok &= assert_true(
+        strcmp(between_queries.items[0]->select_query.where.high.raw, "20") == 0,
+        "BETWEEN high value mismatch"
+    );
+
+    free_query_list(&between_queries);
+    free_token_array(&between_tokens);
     free_query_list(&float_queries);
     free_token_array(&float_tokens);
     free_query_list(&queries);

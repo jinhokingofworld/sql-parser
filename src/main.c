@@ -1,4 +1,6 @@
+#include "bench.h"
 #include "cli.h"
+#include "db_context.h"
 #include "executor.h"
 #include "parser.h"
 #include "tokenizer.h"
@@ -9,6 +11,7 @@ int main(int argc, char **argv) {
     char *sql = NULL;
     TokenArray tokens = {NULL, 0};
     QueryList queries = {NULL, 0};
+    DbContext *ctx = NULL;
     int index;
     int ok = 0;
 
@@ -18,10 +21,25 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    ctx = db_context_create(options.db_root, &error);
+    if (ctx == NULL) {
+        fprintf(stderr, "error: %s\n", error.message);
+        return 1;
+    }
+
+    if (options.bench_rows > 0) {
+        if (!run_benchmark(ctx, options.bench_rows, stdout, &error)) {
+            fprintf(stderr, "error: %s\n", error.message);
+            goto cleanup;
+        }
+        ok = 1;
+        goto cleanup;
+    }
+
     sql = sql_read_text_file(options.sql_path, &error);
     if (sql == NULL) {
         fprintf(stderr, "error: %s\n", error.message);
-        return 1;
+        goto cleanup;
     }
 
     if (!tokenize_sql(sql, &tokens, &error)) {
@@ -44,7 +62,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (!execute_query_list(&queries, options.db_root, stdout, &error)) {
+    if (!execute_query_list(&queries, ctx, stdout, &error)) {
         fprintf(stderr, "error: %s\n", error.message);
         goto cleanup;
     }
@@ -55,5 +73,6 @@ cleanup:
     free(sql);
     free_token_array(&tokens);
     free_query_list(&queries);
+    db_context_destroy(ctx);
     return ok ? 0 : 1;
 }

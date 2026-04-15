@@ -11,6 +11,8 @@ static const KeywordEntry KEYWORDS[] = {
     {"SELECT"},
     {"FROM"},
     {"WHERE"},
+    {"BETWEEN"},
+    {"AND"},
     {"ORDER"},
     {"BY"},
     {"ASC"},

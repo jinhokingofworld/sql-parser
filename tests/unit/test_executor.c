@@ -1,4 +1,5 @@
 #include "executor.h"
+#include "db_context.h"
 #include "parser.h"
 #include "tokenizer.h"
 
@@ -70,9 +71,11 @@ static int create_temp_db(char *path, size_t size) {
         write_text_file(table_path, "1,Alice,20\n2,Bob,31\n") &&
         write_text_file(
             student_schema_path,
-            "table=students\ncolumns=id:int,name:string,grade:int,age:int,region:string,score:float\npkey=id\n"
+            "table=students\n"
+            "columns=id:int,name:string,grade:int,age:int,region:string,score:float\n"
+            "pkey=id\n"
         ) &&
-        write_text_file(student_table_path, "1,Alice,2,20,Seoul,4.25\n2,Bob,3,21,Busan,3.50\n");
+        write_text_file(student_table_path, "20250001,Alice,2,20,Seoul,4.25\n20250002,Bob,3,21,Busan,3.50\n");
 }
 
 static void cleanup_temp_db(const char *db_root) {
@@ -105,6 +108,7 @@ static char *run_sql(const char *sql, const char *db_root) {
     TokenArray tokens = {NULL, 0};
     QueryList queries = {NULL, 0};
     SqlError error = {0, 0, {0}};
+    DbContext *ctx = NULL;
     FILE *output = tmpfile();
     long length;
     char *buffer;
@@ -113,11 +117,14 @@ static char *run_sql(const char *sql, const char *db_root) {
         return NULL;
     }
 
-    if (!tokenize_sql(sql, &tokens, &error) ||
+    ctx = db_context_create(db_root, &error);
+    if (ctx == NULL ||
+        !tokenize_sql(sql, &tokens, &error) ||
         !parse_queries(&tokens, &queries, &error) ||
-        !execute_query_list(&queries, db_root, output, &error)) {
+        !execute_query_list(&queries, ctx, output, &error)) {
         fprintf(stderr, "run_sql failed: %s\n", error.message);
         fclose(output);
+        db_context_destroy(ctx);
         free_token_array(&tokens);
         free_query_list(&queries);
         return NULL;
@@ -140,6 +147,7 @@ static char *run_sql(const char *sql, const char *db_root) {
     buffer[length] = '\0';
 
     fclose(output);
+    db_context_destroy(ctx);
     free_token_array(&tokens);
     free_query_list(&queries);
     return buffer;
@@ -149,17 +157,20 @@ static int run_sql_expect_failure(const char *sql, const char *db_root, char *bu
     TokenArray tokens = {NULL, 0};
     QueryList queries = {NULL, 0};
     SqlError error = {0, 0, {0}};
+    DbContext *ctx = db_context_create(db_root, &error);
     int ok = 0;
 
-    if (tokenize_sql(sql, &tokens, &error) &&
+    if (ctx != NULL &&
+        tokenize_sql(sql, &tokens, &error) &&
         parse_queries(&tokens, &queries, &error) &&
-        execute_query_list(&queries, db_root, stdout, &error)) {
+        execute_query_list(&queries, ctx, stdout, &error)) {
         ok = 0;
     } else {
         snprintf(buffer, size, "%s", error.message);
         ok = 1;
     }
 
+    db_context_destroy(ctx);
     free_token_array(&tokens);
     free_query_list(&queries);
     return ok;
@@ -172,6 +183,7 @@ int main(void) {
     char *select_output;
     char *float_insert_output;
     char *float_select_output;
+    char *between_select_output;
     int ok = 1;
 
     if (!create_temp_db(db_root, sizeof(db_root))) {
@@ -188,11 +200,15 @@ int main(void) {
         db_root
     );
     float_insert_output = run_sql(
-        "INSERT INTO students (id, name, grade, age, region, score) VALUES (3, 'Charlie', 4, 23, 'Incheon', 3.75);",
+        "INSERT INTO students (id, name, grade, age, region, score) VALUES (20250003, 'Charlie', 4, 23, 'Incheon', 3.75);",
         db_root
     );
     float_select_output = run_sql(
         "SELECT name FROM students WHERE score = 4.25 ORDER BY name;",
+        db_root
+    );
+    between_select_output = run_sql(
+        "SELECT id, name FROM students WHERE id BETWEEN 20250001 AND 20250002 ORDER BY id;",
         db_root
     );
     ok &= assert_true(
@@ -204,11 +220,11 @@ int main(void) {
         ),
         "duplicate INSERT should fail"
     );
-
     ok &= assert_true(insert_output != NULL, "INSERT output should exist");
     ok &= assert_true(select_output != NULL, "SELECT output should exist");
     ok &= assert_true(float_insert_output != NULL, "float INSERT output should exist");
     ok &= assert_true(float_select_output != NULL, "float SELECT output should exist");
+    ok &= assert_true(between_select_output != NULL, "BETWEEN SELECT output should exist");
     if (insert_output != NULL) {
         ok &= assert_true(strcmp(insert_output, "INSERT 1\n") == 0, "INSERT output mismatch");
     }
@@ -223,15 +239,20 @@ int main(void) {
         ok &= assert_true(strstr(float_select_output, "Alice") != NULL, "float SELECT should include Alice");
         ok &= assert_true(strstr(float_select_output, "(1 rows)") != NULL, "float SELECT row count mismatch");
     }
+    if (between_select_output != NULL) {
+        ok &= assert_true(strstr(between_select_output, "Alice") != NULL, "BETWEEN SELECT should include Alice");
+        ok &= assert_true(strstr(between_select_output, "Bob") != NULL, "BETWEEN SELECT should include Bob");
+        ok &= assert_true(strstr(between_select_output, "(2 rows)") != NULL, "BETWEEN SELECT row count mismatch");
+    }
     ok &= assert_true(
         strstr(duplicate_error, "duplicate primary key") != NULL,
         "duplicate INSERT should report primary key error"
     );
-
     free(insert_output);
     free(select_output);
     free(float_insert_output);
     free(float_select_output);
+    free(between_select_output);
     cleanup_temp_db(db_root);
     return ok ? 0 : 1;
 }

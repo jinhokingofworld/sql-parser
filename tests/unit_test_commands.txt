@@ -1,0 +1,29 @@
+Unit test commands for the current student B+ tree demo
+
+Workspace:
+C:\Users\max47\OneDrive\Desktop\git\sql-parser
+
+Run each unit test manually:
+
+tests\unit\test_tokenizer.exe
+tests\unit\test_parser.exe
+tests\unit\test_storage.exe
+tests\unit\test_bptree.exe
+tests\unit\test_executor.exe
+
+If you want to run them from PowerShell:
+
+.\tests\unit\test_tokenizer.exe
+.\tests\unit\test_parser.exe
+.\tests\unit\test_storage.exe
+.\tests\unit\test_bptree.exe
+.\tests\unit\test_executor.exe
+
+Expected result:
+- each command exits with code 0
+- no error output
+
+Current student schema assumption used by these tests:
+- id is the student number itself
+- id is the primary key
+- student_id column does not exist
