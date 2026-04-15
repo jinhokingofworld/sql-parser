@@ -4,7 +4,10 @@ __pycache__/
 data/generated/
 
 # Editor and local environment
-.vscode/
+.vscode/*
+!.vscode/c_cpp_properties.json
+!.vscode/settings.json
+!.vscode/extensions.json
 .idea/
 tests/tmp/
 

@@ -1,0 +1,16 @@
+{
+    "C_Cpp.default.cStandard": "c11",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/tests/support"
+    ],
+    "C_Cpp.default.browse.path": [
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/tests/support",
+        "${workspaceFolder}/tests/unit",
+        "${workspaceFolder}/tests/verify",
+        "${workspaceFolder}/tests/bench"
+    ],
+    "C_Cpp.errorSquiggles": "enabled"
+}
