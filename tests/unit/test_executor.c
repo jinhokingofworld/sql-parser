@@ -1,10 +1,18 @@
 #include "executor.h"
+#include "db_context.h"
 #include "parser.h"
 #include "tokenizer.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#define sql_mkdir(path) _mkdir(path)
+#else
+#define sql_mkdir(path) mkdir(path, 0700)
+#endif
 
 static int assert_true(int condition, const char *message) {
     if (!condition) {
@@ -25,52 +33,97 @@ static int write_text_file(const char *path, const char *text) {
     return 1;
 }
 
+static int build_path(char *buffer, size_t size, const char *dir, const char *leaf) {
+    int written = snprintf(buffer, size, "%s/%s", dir, leaf);
+
+    return written >= 0 && (size_t) written < size;
+}
+
+static int run_query_list_with_ctx(const char *sql, DbContext *ctx, FILE *output, SqlError *error) {
+    TokenArray tokens = {NULL, 0};
+    QueryList queries = {NULL, 0};
+    int ok = 0;
+
+    if (tokenize_sql(sql, &tokens, error) &&
+        parse_queries(&tokens, &queries, error) &&
+        execute_query_list(&queries, ctx, output, error)) {
+        ok = 1;
+    }
+
+    free_token_array(&tokens);
+    free_query_list(&queries);
+    return ok;
+}
+
 static int create_temp_db(char *path, size_t size) {
     char schema_path[1024];
     char table_path[1024];
+    char student_schema_path[1024];
+    char student_table_path[1024];
     char schema_dir[1024];
     char table_dir[1024];
 
-    snprintf(path, size, "/tmp/sql-parser-executor-%ld", (long) getpid());
+    snprintf(path, size, "tmp-sql-parser-executor-%ld", (long) getpid());
     unlink(path);
     rmdir(path);
-    if (mkdir(path, 0700) != 0) {
+    if (sql_mkdir(path) != 0) {
         return 0;
     }
 
-    snprintf(schema_dir, sizeof(schema_dir), "%s/schema", path);
-    snprintf(table_dir, sizeof(table_dir), "%s/tables", path);
-    if (mkdir(schema_dir, 0700) != 0 || mkdir(table_dir, 0700) != 0) {
+    if (!build_path(schema_dir, sizeof(schema_dir), path, "schema") ||
+        !build_path(table_dir, sizeof(table_dir), path, "tables")) {
+        return 0;
+    }
+    if (sql_mkdir(schema_dir) != 0 || sql_mkdir(table_dir) != 0) {
         return 0;
     }
 
-    snprintf(schema_path, sizeof(schema_path), "%s/users.schema", schema_dir);
-    snprintf(table_path, sizeof(table_path), "%s/users.csv", table_dir);
-    return write_text_file(schema_path, "table=users\ncolumns=id:int,name:string,age:int\npkey=id\n") &&
-        write_text_file(table_path, "1,Alice,20\n2,Bob,31\n");
+    if (!build_path(schema_path, sizeof(schema_path), schema_dir, "users.schema") ||
+        !build_path(table_path, sizeof(table_path), table_dir, "users.csv") ||
+        !build_path(student_schema_path, sizeof(student_schema_path), schema_dir, "students.schema") ||
+        !build_path(student_table_path, sizeof(student_table_path), table_dir, "students.csv")) {
+        return 0;
+    }
+    return write_text_file(
+            schema_path,
+            "table=users\ncolumns=id:int,name:string,grade:int,age:int,region:string,score:float\npkey=id\nautoincrement=true\n"
+        ) &&
+        write_text_file(table_path, "1,Alice,2,20,Seoul,3.80\n2,Bob,4,25,Busan,4.10\n") &&
+        write_text_file(
+            student_schema_path,
+            "table=students\ncolumns=id:int,name:string,grade:int,age:int,region:string,score:float\npkey=id\n"
+        ) &&
+        write_text_file(student_table_path, "1,Alice,2,20,Seoul,4.25\n2,Bob,3,21,Busan,3.50\n");
 }
 
 static void cleanup_temp_db(const char *db_root) {
     char schema_path[1024];
     char table_path[1024];
+    char student_schema_path[1024];
+    char student_table_path[1024];
     char schema_dir[1024];
     char table_dir[1024];
 
-    snprintf(schema_path, sizeof(schema_path), "%s/schema/users.schema", db_root);
-    snprintf(table_path, sizeof(table_path), "%s/tables/users.csv", db_root);
-    snprintf(schema_dir, sizeof(schema_dir), "%s/schema", db_root);
-    snprintf(table_dir, sizeof(table_dir), "%s/tables", db_root);
+    if (!build_path(schema_dir, sizeof(schema_dir), db_root, "schema") ||
+        !build_path(table_dir, sizeof(table_dir), db_root, "tables") ||
+        !build_path(schema_path, sizeof(schema_path), schema_dir, "users.schema") ||
+        !build_path(table_path, sizeof(table_path), table_dir, "users.csv") ||
+        !build_path(student_schema_path, sizeof(student_schema_path), schema_dir, "students.schema") ||
+        !build_path(student_table_path, sizeof(student_table_path), table_dir, "students.csv")) {
+        return;
+    }
 
     unlink(schema_path);
     unlink(table_path);
+    unlink(student_schema_path);
+    unlink(student_table_path);
     rmdir(schema_dir);
     rmdir(table_dir);
     rmdir(db_root);
 }
 
 static char *run_sql(const char *sql, const char *db_root) {
-    TokenArray tokens = {NULL, 0};
-    QueryList queries = {NULL, 0};
+    DbContext *ctx = NULL;
     SqlError error = {0, 0, {0}};
     FILE *output = tmpfile();
     long length;
@@ -80,13 +133,11 @@ static char *run_sql(const char *sql, const char *db_root) {
         return NULL;
     }
 
-    if (!tokenize_sql(sql, &tokens, &error) ||
-        !parse_queries(&tokens, &queries, &error) ||
-        !execute_query_list(&queries, db_root, output, &error)) {
+    ctx = db_context_create(db_root, &error);
+    if (ctx == NULL || !run_query_list_with_ctx(sql, ctx, output, &error)) {
         fprintf(stderr, "run_sql failed: %s\n", error.message);
         fclose(output);
-        free_token_array(&tokens);
-        free_query_list(&queries);
+        db_context_destroy(ctx);
         return NULL;
     }
 
@@ -98,8 +149,7 @@ static char *run_sql(const char *sql, const char *db_root) {
     buffer = malloc((size_t) length + 1U);
     if (buffer == NULL) {
         fclose(output);
-        free_token_array(&tokens);
-        free_query_list(&queries);
+        db_context_destroy(ctx);
         return NULL;
     }
 
@@ -107,29 +157,40 @@ static char *run_sql(const char *sql, const char *db_root) {
     buffer[length] = '\0';
 
     fclose(output);
-    free_token_array(&tokens);
-    free_query_list(&queries);
+    db_context_destroy(ctx);
     return buffer;
 }
 
 static int run_sql_expect_failure(const char *sql, const char *db_root, char *buffer, size_t size) {
-    TokenArray tokens = {NULL, 0};
-    QueryList queries = {NULL, 0};
+    DbContext *ctx = NULL;
     SqlError error = {0, 0, {0}};
     int ok = 0;
 
-    if (tokenize_sql(sql, &tokens, &error) &&
-        parse_queries(&tokens, &queries, &error) &&
-        execute_query_list(&queries, db_root, stdout, &error)) {
+    ctx = db_context_create(db_root, &error);
+    if (ctx != NULL && run_query_list_with_ctx(sql, ctx, stdout, &error)) {
         ok = 0;
     } else {
         snprintf(buffer, size, "%s", error.message);
         ok = 1;
     }
 
-    free_token_array(&tokens);
-    free_query_list(&queries);
+    db_context_destroy(ctx);
     return ok;
+}
+
+static int replace_table_file_with_directory(const char *db_root) {
+    char tables_dir[1024];
+    char table_path[1024];
+
+    if (!build_path(tables_dir, sizeof(tables_dir), db_root, "tables")) {
+        return 0;
+    }
+    if (!build_path(table_path, sizeof(table_path), tables_dir, "users.csv")) {
+        return 0;
+    }
+
+    unlink(table_path);
+    return sql_mkdir(table_path) == 0;
 }
 
 int main(void) {
@@ -137,6 +198,13 @@ int main(void) {
     char *insert_output;
     char duplicate_error[256] = {0};
     char *select_output;
+    char *float_insert_output;
+    char *float_select_output;
+    DbContext *ctx = NULL;
+    SqlError error = {0, 0, {0}};
+    FILE *failure_output = NULL;
+    char failure_message[256] = {0};
+    TableState *table = NULL;
     int ok = 1;
 
     if (!create_temp_db(db_root, sizeof(db_root))) {
@@ -145,16 +213,24 @@ int main(void) {
     }
 
     insert_output = run_sql(
-        "INSERT INTO users (id, name, age) VALUES (3, 'Charlie', 19);",
+        "INSERT INTO users (name, grade, age, region, score) VALUES ('Charlie', 1, 19, 'Incheon', 3.25);",
         db_root
     );
     select_output = run_sql(
-        "SELECT name FROM users WHERE age = 31 ORDER BY name;",
+        "SELECT name FROM users WHERE id BETWEEN 2 AND 3 ORDER BY id;",
+        db_root
+    );
+    float_insert_output = run_sql(
+        "INSERT INTO students (id, name, grade, age, region, score) VALUES (3, 'Charlie', 4, 23, 'Incheon', 3.75);",
+        db_root
+    );
+    float_select_output = run_sql(
+        "SELECT name FROM students WHERE score = 4.25 ORDER BY name;",
         db_root
     );
     ok &= assert_true(
         run_sql_expect_failure(
-            "INSERT INTO users (id, name, age) VALUES (2, 'Bobby', 28);",
+            "INSERT INTO users (id, name, grade, age, region, score) VALUES (2, 'Bobby', 3, 28, 'Daegu', 3.10);",
             db_root,
             duplicate_error,
             sizeof(duplicate_error)
@@ -164,20 +240,98 @@ int main(void) {
 
     ok &= assert_true(insert_output != NULL, "INSERT output should exist");
     ok &= assert_true(select_output != NULL, "SELECT output should exist");
+    ok &= assert_true(float_insert_output != NULL, "float INSERT output should exist");
+    ok &= assert_true(float_select_output != NULL, "float SELECT output should exist");
     if (insert_output != NULL) {
         ok &= assert_true(strcmp(insert_output, "INSERT 1\n") == 0, "INSERT output mismatch");
     }
     if (select_output != NULL) {
         ok &= assert_true(strstr(select_output, "Bob") != NULL, "SELECT should include Bob");
-        ok &= assert_true(strstr(select_output, "(1 rows)") != NULL, "SELECT row count mismatch");
+        ok &= assert_true(strstr(select_output, "Charlie") != NULL, "SELECT should include Charlie");
+        ok &= assert_true(strstr(select_output, "(2 rows)") != NULL, "SELECT row count mismatch");
+    }
+    if (float_insert_output != NULL) {
+        ok &= assert_true(strcmp(float_insert_output, "INSERT 1\n") == 0, "float INSERT output mismatch");
+    }
+    if (float_select_output != NULL) {
+        ok &= assert_true(strstr(float_select_output, "Alice") != NULL, "float SELECT should include Alice");
+        ok &= assert_true(strstr(float_select_output, "(1 rows)") != NULL, "float SELECT row count mismatch");
     }
     ok &= assert_true(
-        strstr(duplicate_error, "duplicate primary key") != NULL,
-        "duplicate INSERT should report primary key error"
+        strstr(duplicate_error, "reserved and cannot be specified manually") != NULL,
+        "manual id INSERT should report reserved column error"
     );
 
+    ctx = db_context_create(db_root, &error);
+    ok &= assert_true(ctx != NULL, "DbContext should be created for append failure test");
+    ok &= assert_true(replace_table_file_with_directory(db_root), "users.csv should be replaced with a directory");
+    failure_output = tmpfile();
+    ok &= assert_true(failure_output != NULL, "failure output stream should exist");
+    if (ctx != NULL && failure_output != NULL) {
+        ok &= assert_true(
+            !run_query_list_with_ctx(
+                "INSERT INTO users (name, grade, age, region, score) VALUES ('Delta', 3, 23, 'Daejeon', 3.55);",
+                ctx,
+                failure_output,
+                &error
+            ),
+            "INSERT should fail when CSV append fails"
+        );
+        snprintf(failure_message, sizeof(failure_message), "%s", error.message);
+        ok &= assert_true(strstr(failure_message, "failed to open table") != NULL, "append failure should report file open error");
+        table = db_context_find_table(ctx, "users");
+        ok &= assert_true(table != NULL, "users table should still exist after failed INSERT");
+        if (table != NULL) {
+            ok &= assert_true(table->rowset.row_count == 3, "failed INSERT should roll back the published row");
+            ok &= assert_true(table->index == NULL, "failed append should invalidate the index");
+            ok &= assert_true(table->next_id == 4, "failed INSERT should not advance next_id");
+        }
+    }
+
+    if (ctx != NULL && failure_output != NULL) {
+        FILE *select_after_failure = tmpfile();
+        char buffer[1024];
+        long length = 0;
+
+        ok &= assert_true(select_after_failure != NULL, "post-failure SELECT output should exist");
+        if (select_after_failure != NULL) {
+            error.message[0] = '\0';
+            ok &= assert_true(
+                run_query_list_with_ctx(
+                    "SELECT name FROM users ORDER BY id;",
+                    ctx,
+                    select_after_failure,
+                    &error
+                ),
+                "SELECT should still succeed on the in-memory context after failed INSERT"
+            );
+            fflush(select_after_failure);
+            fseek(select_after_failure, 0L, SEEK_END);
+            length = ftell(select_after_failure);
+            rewind(select_after_failure);
+            memset(buffer, 0, sizeof(buffer));
+            if ((size_t) length < sizeof(buffer)) {
+                fread(buffer, 1U, (size_t) length, select_after_failure);
+                ok &= assert_true(strstr(buffer, "Alice") != NULL, "post-failure SELECT should include Alice");
+                ok &= assert_true(strstr(buffer, "Bob") != NULL, "post-failure SELECT should include Bob");
+                ok &= assert_true(strstr(buffer, "Charlie") != NULL, "post-failure SELECT should still include Charlie");
+                ok &= assert_true(strstr(buffer, "Delta") == NULL, "failed INSERT row should not be published");
+                ok &= assert_true(strstr(buffer, "(3 rows)") != NULL, "failed INSERT should preserve row count");
+            } else {
+                ok &= assert_true(0, "post-failure SELECT output exceeded buffer");
+            }
+            fclose(select_after_failure);
+        }
+    }
+
+    if (failure_output != NULL) {
+        fclose(failure_output);
+    }
+    db_context_destroy(ctx);
     free(insert_output);
     free(select_output);
+    free(float_insert_output);
+    free(float_select_output);
     cleanup_temp_db(db_root);
     return ok ? 0 : 1;
 }

@@ -1,72 +1,50 @@
 #include "storage.h"
+#include "test_helpers.h"
+#include "unity.h"
 
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
+static char g_db_root[1024];
 
-static int assert_true(int condition, const char *message) {
-    if (!condition) {
-        fprintf(stderr, "assertion failed: %s\n", message);
-        return 0;
-    }
-    return 1;
+/* ms: Each test gets its own temp root so fixture-based checks stay isolated. */
+void setUp(void) {
+    TEST_ASSERT_TRUE(test_build_temp_root(g_db_root, sizeof(g_db_root), "sql-parser-storage"));
 }
 
-static int create_temp_db(char *path, size_t size) {
-    snprintf(path, size, "/tmp/sql-parser-storage-%ld", (long) getpid());
-    unlink(path);
-    rmdir(path);
-    if (mkdir(path, 0700) != 0) {
-        return 0;
-    }
-    snprintf(path + strlen(path), size - strlen(path), "/tables");
-    if (mkdir(path, 0700) != 0) {
-        return 0;
-    }
-    path[strlen(path) - strlen("/tables")] = '\0';
-    return 1;
+void tearDown(void) {
+    test_cleanup_table_db(g_db_root, "students");
 }
 
-static void cleanup_temp_db(const char *db_root) {
-    char file_path[1024];
-    char tables_path[1024];
-
-    snprintf(file_path, sizeof(file_path), "%s/tables/users.csv", db_root);
-    snprintf(tables_path, sizeof(tables_path), "%s/tables", db_root);
-    unlink(file_path);
-    rmdir(tables_path);
-    rmdir(db_root);
-}
-
-int main(void) {
-    char db_root[1024];
+/* ms: Keeps the original CSV escaping check but under the shared Unity runner. */
+static void test_append_and_read_csv_preserves_escaped_fields(void) {
     char *fields[] = {"1", "Alice, Jr.", "She said \"hi\""};
     RowSet rowset;
     SqlError error = {0, 0, {0}};
-    int ok = 1;
+    int ok = test_create_db_layout(g_db_root, 0, 1);
 
-    if (!create_temp_db(db_root, sizeof(db_root))) {
-        fprintf(stderr, "failed to create temp db\n");
-        return 1;
+    if (!ok) {
+        TEST_ASSERT_TRUE_MESSAGE(ok, "failed to create temp db");
+        return;
     }
 
-    if (!append_csv_row(db_root, "users", fields, 3, &error)) {
-        fprintf(stderr, "append_csv_row failed: %s\n", error.message);
-        cleanup_temp_db(db_root);
-        return 1;
+    ok = append_csv_row(g_db_root, "students", fields, 3, &error);
+    if (!ok) {
+        TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
+        return;
     }
 
-    if (!read_csv_rows(db_root, "users", 3, &rowset, &error)) {
-        fprintf(stderr, "read_csv_rows failed: %s\n", error.message);
-        cleanup_temp_db(db_root);
-        return 1;
+    ok = read_csv_rows(g_db_root, "students", 3, &rowset, &error);
+    if (!ok) {
+        TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
+        return;
     }
-
-    ok &= assert_true(rowset.row_count == 1, "expected one row");
-    ok &= assert_true(strcmp(rowset.rows[0].fields[1], "Alice, Jr.") == 0, "CSV comma escape failed");
-    ok &= assert_true(strcmp(rowset.rows[0].fields[2], "She said \"hi\"") == 0, "CSV quote escape failed");
+    TEST_ASSERT_EQUAL_INT(1, rowset.row_count);
+    TEST_ASSERT_EQUAL_STRING("Alice, Jr.", rowset.rows[0].fields[1]);
+    TEST_ASSERT_EQUAL_STRING("She said \"hi\"", rowset.rows[0].fields[2]);
 
     free_rowset(&rowset);
-    cleanup_temp_db(db_root);
-    return ok ? 0 : 1;
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_append_and_read_csv_preserves_escaped_fields);
+    return UNITY_END();
 }

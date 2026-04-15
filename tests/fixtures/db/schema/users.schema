@@ -1,3 +1,4 @@
 table=users
-columns=id:int,name:string,age:int
+columns=id:int,name:string,grade:int,age:int,region:string,score:float
 pkey=id
+autoincrement=true

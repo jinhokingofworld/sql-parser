@@ -9,8 +9,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
 
 RUN useradd -m -s /bin/bash jungle && usermod -aG sudo jungle
 
+
 # 암호 설정
 RUN echo 'jungle:jungle' | chpasswd
+RUN apt-get update && apt-get install -y python3 python3-pip python-is-python3 && rm -rf /var/lib/apt/lists/*
+RUN python3 -m pip install --no-cache-dir --break-system-packages "Faker>=40.13.0,<41"
+
 
 USER jungle
 WORKDIR /home/jungle

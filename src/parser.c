@@ -86,7 +86,7 @@ static int parse_value(TokenStream *stream, Value *value, SqlError *error) {
     const Token *token = peek_token(stream);
 
     if (token->type == TOKEN_NUMBER) {
-        value->type = VALUE_INT;
+        value->type = strchr(token->lexeme, '.') != NULL ? VALUE_FLOAT : VALUE_INT;
         value->raw = duplicate_token_lexeme(token, error);
     } else if (token->type == TOKEN_STRING) {
         value->type = VALUE_STRING;
@@ -168,11 +168,27 @@ static int parse_where_clause(TokenStream *stream, Condition *condition, SqlErro
     if (!parse_identifier(stream, &condition->column, error)) {
         return 0;
     }
-    if (!expect_type(stream, TOKEN_EQUALS, error, "`=`")) {
-        return 0;
-    }
-    if (!parse_value(stream, &condition->value, error)) {
-        return 0;
+
+    if (token_is_keyword(peek_token(stream), "BETWEEN")) {
+        condition->type = COND_BETWEEN;
+        consume_token(stream);
+        if (!parse_value(stream, &condition->low, error)) {
+            return 0;
+        }
+        if (!expect_keyword(stream, "AND", error)) {
+            return 0;
+        }
+        if (!parse_value(stream, &condition->high, error)) {
+            return 0;
+        }
+    } else {
+        condition->type = COND_EQ;
+        if (!expect_type(stream, TOKEN_EQUALS, error, "`=`")) {
+            return 0;
+        }
+        if (!parse_value(stream, &condition->value, error)) {
+            return 0;
+        }
     }
 
     return 1;
