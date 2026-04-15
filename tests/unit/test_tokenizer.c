@@ -1,44 +1,46 @@
 #include "tokenizer.h"
+#include "unity.h"
 
-static int assert_true(int condition, const char *message) {
-    if (!condition) {
-        fprintf(stderr, "assertion failed: %s\n", message);
-        return 0;
-    }
-    return 1;
+void setUp(void) {
 }
 
-int main(void) {
+void tearDown(void) {
+}
+
+/* ms: Keeps the original tokenizer coverage for SELECT/WHERE/ORDER BY in one focused case. */
+static void test_tokenize_select_with_where_and_order_by(void) {
     const char *sql = "SeLeCt id, name FROM users WHERE age = 20 ORDER BY name;";
     TokenArray tokens = {NULL, 0};
     SqlError error = {0, 0, {0}};
+    int ok = tokenize_sql(sql, &tokens, &error);
 
-    if (!tokenize_sql(sql, &tokens, &error)) {
-        fprintf(stderr, "tokenize_sql failed: %s\n", error.message);
-        return 1;
-    }
-
-    if (!assert_true(tokens.count == 15, "unexpected token count")) {
-        free_token_array(&tokens);
-        return 1;
-    }
-    if (!assert_true(tokens.items[0].type == TOKEN_KEYWORD, "SELECT should be keyword")) {
-        free_token_array(&tokens);
-        return 1;
-    }
-    if (!assert_true(strcmp(tokens.items[1].lexeme, "id") == 0, "column name should match")) {
-        free_token_array(&tokens);
-        return 1;
-    }
-    if (!assert_true(tokens.items[9].type == TOKEN_NUMBER, "WHERE value should be number")) {
-        free_token_array(&tokens);
-        return 1;
-    }
-    if (!assert_true(tokens.items[12].type == TOKEN_IDENTIFIER, "ORDER BY target should be identifier")) {
-        free_token_array(&tokens);
-        return 1;
-    }
+    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
+    TEST_ASSERT_EQUAL_INT(15, tokens.count);
+    TEST_ASSERT_EQUAL_INT(TOKEN_KEYWORD, tokens.items[0].type);
+    TEST_ASSERT_EQUAL_STRING("id", tokens.items[1].lexeme);
+    TEST_ASSERT_EQUAL_INT(TOKEN_NUMBER, tokens.items[9].type);
+    TEST_ASSERT_EQUAL_INT(TOKEN_IDENTIFIER, tokens.items[12].type);
 
     free_token_array(&tokens);
-    return 0;
+}
+
+/* ms: Added to protect dataset values that contain punctuation from tokenization regressions. */
+static void test_tokenize_preserves_string_literal_contents(void) {
+    const char *sql = "INSERT INTO users (name) VALUES ('Alice, Jr.');";
+    TokenArray tokens = {NULL, 0};
+    SqlError error = {0, 0, {0}};
+    int ok = tokenize_sql(sql, &tokens, &error);
+
+    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
+    TEST_ASSERT_EQUAL_INT(TOKEN_STRING, tokens.items[8].type);
+    TEST_ASSERT_EQUAL_STRING("Alice, Jr.", tokens.items[8].lexeme);
+
+    free_token_array(&tokens);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_tokenize_select_with_where_and_order_by);
+    RUN_TEST(test_tokenize_preserves_string_literal_contents);
+    return UNITY_END();
 }

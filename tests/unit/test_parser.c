@@ -1,42 +1,63 @@
 #include "parser.h"
+#include "unity.h"
 
-static int assert_true(int condition, const char *message) {
-    if (!condition) {
-        fprintf(stderr, "assertion failed: %s\n", message);
-        return 0;
-    }
-    return 1;
+void setUp(void) {
 }
 
-int main(void) {
+void tearDown(void) {
+}
+
+/* ms: Preserves the original multi-statement parser contract while using Unity assertions. */
+static void test_parse_insert_followed_by_select(void) {
     const char *sql =
         "INSERT INTO users (id, name, age) VALUES (1, 'Alice', 20);"
         "SELECT id, name FROM users WHERE age = 20 ORDER BY name;";
     TokenArray tokens = {NULL, 0};
     QueryList queries = {NULL, 0};
     SqlError error = {0, 0, {0}};
-    int ok = 1;
+    int ok = tokenize_sql(sql, &tokens, &error);
 
-    if (!tokenize_sql(sql, &tokens, &error)) {
-        fprintf(stderr, "tokenize_sql failed: %s\n", error.message);
-        return 1;
-    }
+    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
+    ok = parse_queries(&tokens, &queries, &error);
+    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
 
-    if (!parse_queries(&tokens, &queries, &error)) {
-        fprintf(stderr, "parse_queries failed: %s\n", error.message);
-        free_token_array(&tokens);
-        return 1;
-    }
-
-    ok &= assert_true(queries.count == 2, "expected two statements");
-    ok &= assert_true(queries.items[0]->type == QUERY_INSERT, "first query should be INSERT");
-    ok &= assert_true(queries.items[0]->insert_query.column_count == 3, "INSERT should have three columns");
-    ok &= assert_true(strcmp(queries.items[1]->select_query.table_name, "users") == 0, "SELECT table mismatch");
-    ok &= assert_true(queries.items[1]->select_query.has_where == 1, "WHERE clause missing");
-    ok &= assert_true(strcmp(queries.items[1]->select_query.where.column, "age") == 0, "WHERE column mismatch");
-    ok &= assert_true(queries.items[1]->select_query.has_order_by == 1, "ORDER BY clause missing");
+    TEST_ASSERT_EQUAL_INT(2, queries.count);
+    TEST_ASSERT_EQUAL_INT(QUERY_INSERT, queries.items[0]->type);
+    TEST_ASSERT_EQUAL_INT(3, queries.items[0]->insert_query.column_count);
+    TEST_ASSERT_EQUAL_STRING("users", queries.items[1]->select_query.table_name);
+    TEST_ASSERT_TRUE(queries.items[1]->select_query.has_where);
+    TEST_ASSERT_EQUAL_STRING("age", queries.items[1]->select_query.where.column);
+    TEST_ASSERT_TRUE(queries.items[1]->select_query.has_order_by);
 
     free_query_list(&queries);
     free_token_array(&tokens);
-    return ok ? 0 : 1;
+}
+
+/* ms: Locks in the WHERE id = number shape that the index path will depend on later. */
+static void test_parse_where_id_equality_for_indexable_shape(void) {
+    const char *sql = "SELECT * FROM users WHERE id = 500000;";
+    TokenArray tokens = {NULL, 0};
+    QueryList queries = {NULL, 0};
+    SqlError error = {0, 0, {0}};
+    int ok = tokenize_sql(sql, &tokens, &error);
+
+    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
+    ok = parse_queries(&tokens, &queries, &error);
+    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
+
+    TEST_ASSERT_EQUAL_INT(1, queries.count);
+    TEST_ASSERT_EQUAL_INT(QUERY_SELECT, queries.items[0]->type);
+    TEST_ASSERT_TRUE(queries.items[0]->select_query.has_where);
+    TEST_ASSERT_EQUAL_STRING("id", queries.items[0]->select_query.where.column);
+    TEST_ASSERT_EQUAL_STRING("500000", queries.items[0]->select_query.where.value.raw);
+
+    free_query_list(&queries);
+    free_token_array(&tokens);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_parse_insert_followed_by_select);
+    RUN_TEST(test_parse_where_id_equality_for_indexable_shape);
+    return UNITY_END();
 }

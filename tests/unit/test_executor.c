@@ -1,73 +1,29 @@
 #include "executor.h"
 #include "parser.h"
+#include "test_helpers.h"
 #include "tokenizer.h"
+#include "unity.h"
 
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
+static char g_db_root[1024];
 
-static int assert_true(int condition, const char *message) {
-    if (!condition) {
-        fprintf(stderr, "assertion failed: %s\n", message);
-        return 0;
-    }
-    return 1;
+/* ms: Rebuild a tiny users database before each test so executor cases remain independent. */
+void setUp(void) {
+    int ok = test_build_temp_root(g_db_root, sizeof(g_db_root), "sql-parser-executor");
+
+    TEST_ASSERT_TRUE(ok);
+    ok = test_create_users_db(
+        g_db_root,
+        "table=users\ncolumns=id:int,name:string,age:int\npkey=id\n",
+        "1,Alice,20\n2,Bob,31\n"
+    );
+    TEST_ASSERT_TRUE_MESSAGE(ok, "failed to create executor temp db");
 }
 
-static int write_text_file(const char *path, const char *text) {
-    FILE *file = fopen(path, "w");
-
-    if (file == NULL) {
-        return 0;
-    }
-    fputs(text, file);
-    fclose(file);
-    return 1;
+void tearDown(void) {
+    test_cleanup_users_db(g_db_root);
 }
 
-static int create_temp_db(char *path, size_t size) {
-    char schema_path[1024];
-    char table_path[1024];
-    char schema_dir[1024];
-    char table_dir[1024];
-
-    snprintf(path, size, "/tmp/sql-parser-executor-%ld", (long) getpid());
-    unlink(path);
-    rmdir(path);
-    if (mkdir(path, 0700) != 0) {
-        return 0;
-    }
-
-    snprintf(schema_dir, sizeof(schema_dir), "%s/schema", path);
-    snprintf(table_dir, sizeof(table_dir), "%s/tables", path);
-    if (mkdir(schema_dir, 0700) != 0 || mkdir(table_dir, 0700) != 0) {
-        return 0;
-    }
-
-    snprintf(schema_path, sizeof(schema_path), "%s/users.schema", schema_dir);
-    snprintf(table_path, sizeof(table_path), "%s/users.csv", table_dir);
-    return write_text_file(schema_path, "table=users\ncolumns=id:int,name:string,age:int\npkey=id\n") &&
-        write_text_file(table_path, "1,Alice,20\n2,Bob,31\n");
-}
-
-static void cleanup_temp_db(const char *db_root) {
-    char schema_path[1024];
-    char table_path[1024];
-    char schema_dir[1024];
-    char table_dir[1024];
-
-    snprintf(schema_path, sizeof(schema_path), "%s/schema/users.schema", db_root);
-    snprintf(table_path, sizeof(table_path), "%s/tables/users.csv", db_root);
-    snprintf(schema_dir, sizeof(schema_dir), "%s/schema", db_root);
-    snprintf(table_dir, sizeof(table_dir), "%s/tables", db_root);
-
-    unlink(schema_path);
-    unlink(table_path);
-    rmdir(schema_dir);
-    rmdir(table_dir);
-    rmdir(db_root);
-}
-
+/* ms: Shared helper runs the full tokenize-parse-execute path and captures output for assertions. */
 static char *run_sql(const char *sql, const char *db_root) {
     TokenArray tokens = {NULL, 0};
     QueryList queries = {NULL, 0};
@@ -112,6 +68,7 @@ static char *run_sql(const char *sql, const char *db_root) {
     return buffer;
 }
 
+/* ms: Negative-path helper keeps error assertions in tests without printing noisy failures as successes. */
 static int run_sql_expect_failure(const char *sql, const char *db_root, char *buffer, size_t size) {
     TokenArray tokens = {NULL, 0};
     QueryList queries = {NULL, 0};
@@ -132,52 +89,49 @@ static int run_sql_expect_failure(const char *sql, const char *db_root, char *bu
     return ok;
 }
 
-int main(void) {
-    char db_root[1024];
-    char *insert_output;
-    char duplicate_error[256] = {0};
-    char *select_output;
-    int ok = 1;
-
-    if (!create_temp_db(db_root, sizeof(db_root))) {
-        fprintf(stderr, "failed to create temp db\n");
-        return 1;
-    }
-
-    insert_output = run_sql(
+/* ms: Verifies the happy-path INSERT contract before index integration changes executor behavior. */
+static void test_execute_insert_returns_insert_count(void) {
+    char *insert_output = run_sql(
         "INSERT INTO users (id, name, age) VALUES (3, 'Charlie', 19);",
-        db_root
-    );
-    select_output = run_sql(
-        "SELECT name FROM users WHERE age = 31 ORDER BY name;",
-        db_root
-    );
-    ok &= assert_true(
-        run_sql_expect_failure(
-            "INSERT INTO users (id, name, age) VALUES (2, 'Bobby', 28);",
-            db_root,
-            duplicate_error,
-            sizeof(duplicate_error)
-        ),
-        "duplicate INSERT should fail"
+        g_db_root
     );
 
-    ok &= assert_true(insert_output != NULL, "INSERT output should exist");
-    ok &= assert_true(select_output != NULL, "SELECT output should exist");
-    if (insert_output != NULL) {
-        ok &= assert_true(strcmp(insert_output, "INSERT 1\n") == 0, "INSERT output mismatch");
-    }
-    if (select_output != NULL) {
-        ok &= assert_true(strstr(select_output, "Bob") != NULL, "SELECT should include Bob");
-        ok &= assert_true(strstr(select_output, "(1 rows)") != NULL, "SELECT row count mismatch");
-    }
-    ok &= assert_true(
-        strstr(duplicate_error, "duplicate primary key") != NULL,
-        "duplicate INSERT should report primary key error"
-    );
-
+    TEST_ASSERT_NOT_NULL(insert_output);
+    TEST_ASSERT_EQUAL_STRING("INSERT 1\n", insert_output);
     free(insert_output);
+}
+
+/* ms: Keeps the existing SELECT filtering behavior under test as a regression baseline. */
+static void test_execute_select_filters_rows(void) {
+    char *select_output = run_sql(
+        "SELECT name FROM users WHERE age = 31 ORDER BY name;",
+        g_db_root
+    );
+
+    TEST_ASSERT_NOT_NULL(select_output);
+    TEST_ASSERT_TRUE(strstr(select_output, "Bob") != NULL);
+    TEST_ASSERT_TRUE(strstr(select_output, "(1 rows)") != NULL);
     free(select_output);
-    cleanup_temp_db(db_root);
-    return ok ? 0 : 1;
+}
+
+/* ms: Preserves duplicate primary-key rejection as an executor-level guardrail. */
+static void test_execute_insert_rejects_duplicate_primary_key(void) {
+    char duplicate_error[256] = {0};
+    int ok = run_sql_expect_failure(
+        "INSERT INTO users (id, name, age) VALUES (2, 'Bobby', 28);",
+        g_db_root,
+        duplicate_error,
+        sizeof(duplicate_error)
+    );
+
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_TRUE(strstr(duplicate_error, "duplicate primary key") != NULL);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_execute_insert_returns_insert_count);
+    RUN_TEST(test_execute_select_filters_rows);
+    RUN_TEST(test_execute_insert_rejects_duplicate_primary_key);
+    return UNITY_END();
 }

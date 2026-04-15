@@ -3,6 +3,7 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -Iinclude
 
 TARGET := sql_processor
 LIB_SRCS := src/cli.c src/tokenizer.c src/parser.c src/schema.c src/storage.c src/executor.c src/utils.c
+TEST_SUPPORT_SRCS := tests/support/unity.c tests/support/test_helpers.c
 UNIT_TEST_BINS := tests/unit/test_tokenizer tests/unit/test_parser tests/unit/test_storage tests/unit/test_executor
 
 .PHONY: all clean test unit integration
@@ -13,16 +14,16 @@ $(TARGET): src/main.c $(LIB_SRCS)
 	$(CC) $(CFLAGS) -o $@ src/main.c $(LIB_SRCS)
 
 tests/unit/test_tokenizer: tests/unit/test_tokenizer.c $(LIB_SRCS)
-	$(CC) $(CFLAGS) -o $@ tests/unit/test_tokenizer.c $(LIB_SRCS)
+	$(CC) $(CFLAGS) -Itests/support -o $@ tests/unit/test_tokenizer.c $(LIB_SRCS) $(TEST_SUPPORT_SRCS)
 
 tests/unit/test_parser: tests/unit/test_parser.c $(LIB_SRCS)
-	$(CC) $(CFLAGS) -o $@ tests/unit/test_parser.c $(LIB_SRCS)
+	$(CC) $(CFLAGS) -Itests/support -o $@ tests/unit/test_parser.c $(LIB_SRCS) $(TEST_SUPPORT_SRCS)
 
 tests/unit/test_storage: tests/unit/test_storage.c $(LIB_SRCS)
-	$(CC) $(CFLAGS) -o $@ tests/unit/test_storage.c $(LIB_SRCS)
+	$(CC) $(CFLAGS) -Itests/support -o $@ tests/unit/test_storage.c $(LIB_SRCS) $(TEST_SUPPORT_SRCS)
 
 tests/unit/test_executor: tests/unit/test_executor.c $(LIB_SRCS)
-	$(CC) $(CFLAGS) -o $@ tests/unit/test_executor.c $(LIB_SRCS)
+	$(CC) $(CFLAGS) -Itests/support -o $@ tests/unit/test_executor.c $(LIB_SRCS) $(TEST_SUPPORT_SRCS)
 
 unit: $(UNIT_TEST_BINS)
 	./tests/unit/test_tokenizer
