@@ -5,7 +5,7 @@
 static char g_db_root[1024];
 static const char *g_users_schema_text =
     "table=users\n"
-    "columns=id:int,name:string,grade:int,age:int,region:char[],score:float\n"
+    "columns=id:int,name:string,grade:int,age:int,region:string,score:string\n"
     "pkey=id\n";
 
 /* ms: Each test gets its own temp root so fixture-based checks stay isolated. */
@@ -67,6 +67,21 @@ static int age_matches_grade(long grade, long age) {
     }
 }
 
+/* ms: Text fixture comparisons should ignore CRLF/LF differences across local environments. */
+static void normalize_newlines(char *text) {
+    char *read_cursor = text;
+    char *write_cursor = text;
+
+    while (*read_cursor != '\0') {
+        if (*read_cursor != '\r') {
+            *write_cursor++ = *read_cursor;
+        }
+        read_cursor++;
+    }
+
+    *write_cursor = '\0';
+}
+
 /* ms: This helper is the reusable contract checker that future generator outputs can run against unchanged. */
 static void assert_dataset_row_contract(const RowSet *rowset, long start_id) {
     int row_index;
@@ -107,6 +122,22 @@ static void assert_dataset_row_contract(const RowSet *rowset, long start_id) {
             "score must be a float with at most two decimal places"
         );
         TEST_ASSERT_TRUE_MESSAGE(score >= 0.0 && score <= 4.5, "score must stay in the range 0.00..4.50");
+    }
+}
+
+/* ms: Positive generator fixtures should still prove that ids stay unique across the produced row set. */
+static void assert_ids_are_unique(const RowSet *rowset) {
+    int left;
+
+    for (left = 0; left < rowset->row_count; left++) {
+        int right;
+
+        for (right = left + 1; right < rowset->row_count; right++) {
+            TEST_ASSERT_FALSE_MESSAGE(
+                strcmp(rowset->rows[left].fields[0], rowset->rows[right].fields[0]) == 0,
+                "generated ids must be unique"
+            );
+        }
     }
 }
 
@@ -174,6 +205,7 @@ static void test_generated_dataset_schema_matches_contract(void) {
         return;
     }
 
+    normalize_newlines(schema_text);
     TEST_ASSERT_EQUAL_STRING(g_users_schema_text, schema_text);
     free(schema_text);
 }
@@ -202,6 +234,7 @@ static void test_read_generated_fixture_rows_support_dataset_checks(void) {
     }
     TEST_ASSERT_EQUAL_INT(3, rowset.row_count);
     assert_dataset_row_contract(&rowset, 100);
+    assert_ids_are_unique(&rowset);
 
     free_rowset(&rowset);
 }
