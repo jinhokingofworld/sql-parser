@@ -168,11 +168,27 @@ static int parse_where_clause(TokenStream *stream, Condition *condition, SqlErro
     if (!parse_identifier(stream, &condition->column, error)) {
         return 0;
     }
-    if (!expect_type(stream, TOKEN_EQUALS, error, "`=`")) {
-        return 0;
-    }
-    if (!parse_value(stream, &condition->value, error)) {
-        return 0;
+
+    if (token_is_keyword(peek_token(stream), "BETWEEN")) {
+        condition->type = COND_BETWEEN;
+        consume_token(stream);
+        if (!parse_value(stream, &condition->low, error)) {
+            return 0;
+        }
+        if (!expect_keyword(stream, "AND", error)) {
+            return 0;
+        }
+        if (!parse_value(stream, &condition->high, error)) {
+            return 0;
+        }
+    } else {
+        condition->type = COND_EQ;
+        if (!expect_type(stream, TOKEN_EQUALS, error, "`=`")) {
+            return 0;
+        }
+        if (!parse_value(stream, &condition->value, error)) {
+            return 0;
+        }
     }
 
     return 1;

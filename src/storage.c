@@ -157,6 +157,30 @@ static int parse_csv_line(const char *line, int expected_fields, Row *row, SqlEr
     return 1;
 }
 
+int rowset_reserve(RowSet *rowset, int min_capacity, SqlError *error) {
+    int new_capacity;
+    Row *next_rows;
+
+    if (rowset->row_capacity >= min_capacity) {
+        return 1;
+    }
+
+    new_capacity = rowset->row_capacity > 0 ? rowset->row_capacity : 8;
+    while (new_capacity < min_capacity) {
+        new_capacity *= 2;
+    }
+
+    next_rows = realloc(rowset->rows, sizeof(Row) * (size_t) new_capacity);
+    if (next_rows == NULL) {
+        sql_set_error(error, 0, 0, "out of memory while growing rowset");
+        return 0;
+    }
+
+    rowset->rows = next_rows;
+    rowset->row_capacity = new_capacity;
+    return 1;
+}
+
 /* Releases every parsed CSV row and field string owned by a RowSet. */
 void free_rowset(RowSet *rowset) {
     int row_index;
@@ -176,6 +200,7 @@ void free_rowset(RowSet *rowset) {
     free(rowset->rows);
     rowset->rows = NULL;
     rowset->row_count = 0;
+    rowset->row_capacity = 0;
     rowset->column_count = 0;
 }
 
@@ -245,6 +270,7 @@ int read_csv_rows(
 
     rowset->rows = NULL;
     rowset->row_count = 0;
+    rowset->row_capacity = 0;
     rowset->column_count = expected_fields;
 
     if (!build_table_path(db_root, table_name, path, sizeof(path))) {
@@ -259,8 +285,8 @@ int read_csv_rows(
     }
 
     while (fgets(line, sizeof(line), file) != NULL) {
-        Row *next_rows;
         size_t length = strlen(line);
+        Row row;
 
         while (length > 0 && (line[length - 1] == '\n' || line[length - 1] == '\r')) {
             line[--length] = '\0';
@@ -270,20 +296,18 @@ int read_csv_rows(
             continue;
         }
 
-        next_rows = realloc(rowset->rows, sizeof(Row) * (size_t) (rowset->row_count + 1));
-        if (next_rows == NULL) {
-            sql_set_error(error, 0, 0, "out of memory while reading table");
+        if (!rowset_reserve(rowset, rowset->row_count + 1, error)) {
             fclose(file);
             free_rowset(rowset);
             return 0;
         }
 
-        rowset->rows = next_rows;
-        if (!parse_csv_line(line, expected_fields, &rowset->rows[rowset->row_count], error)) {
+        if (!parse_csv_line(line, expected_fields, &row, error)) {
             fclose(file);
             free_rowset(rowset);
             return 0;
         }
+        rowset->rows[rowset->row_count] = row;
         rowset->row_count++;
     }
 

@@ -7,6 +7,7 @@ import argparse
 import csv
 import random
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -19,6 +20,7 @@ DEFAULT_ROWS = 1_000_000
 DEFAULT_OUTPUT = Path("data/generated/students_1m.csv")
 DEFAULT_START_ID = 1
 DEFAULT_LOCALE = "ko_KR"
+PROGRESS_BAR_WIDTH = 30
 
 
 def positive_int(value: str) -> int:
@@ -81,6 +83,54 @@ def make_age(rng: random.Random, grade: int) -> int:
     return rng.randint(min_age_by_grade[grade], min_age_by_grade[grade] + 4)
 
 
+def progress_step(total: int) -> int:
+    return max(10_000, min(50_000, total // 20 if total >= 20 else 1))
+
+
+def render_progress_bar(current: int, total: int) -> str:
+    filled = (current * PROGRESS_BAR_WIDTH) // total
+    if filled > PROGRESS_BAR_WIDTH:
+        filled = PROGRESS_BAR_WIDTH
+    return "#" * filled + "." * (PROGRESS_BAR_WIDTH - filled)
+
+
+class ProgressReporter:
+    def __init__(self, total: int, label: str) -> None:
+        self.total = total
+        self.label = label
+        self.step = progress_step(total)
+        self.is_tty = sys.stderr.isatty()
+        self.started_at = time.time()
+        self.last_reported = 0
+
+    def update(self, current: int) -> None:
+        if current < self.total and current - self.last_reported < self.step:
+            return
+
+        elapsed = time.time() - self.started_at
+        if self.is_tty:
+            percent = (current * 100) // self.total
+            bar = render_progress_bar(current, self.total)
+            print(
+                f"\r[{self.label}] [{bar}] {percent:3d}% "
+                f"({current}/{self.total}) elapsed={elapsed:0.1f}s",
+                end="",
+                file=sys.stderr,
+                flush=True,
+            )
+            if current >= self.total:
+                print(file=sys.stderr, flush=True)
+        else:
+            print(
+                f"[{self.label}] {current}/{self.total} rows written "
+                f"({(current * 100) // self.total}%) elapsed={elapsed:0.1f}s",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        self.last_reported = current
+
+
 def generate_rows(args: argparse.Namespace):
     if Faker is None:
         raise RuntimeError("Faker is not installed. Install it with: python3 -m pip install Faker")
@@ -108,12 +158,15 @@ def generate_rows(args: argparse.Namespace):
 
 
 def write_csv(args: argparse.Namespace) -> int:
+    reporter = ProgressReporter(args.rows, "GEN")
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     with args.output.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file)
-        for row in generate_rows(args):
+        for index, row in enumerate(generate_rows(args), start=1):
             writer.writerow(row)
+            reporter.update(index)
 
     return args.rows
 

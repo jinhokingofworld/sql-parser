@@ -1,4 +1,5 @@
 #include "common.h"
+#include "db_context.h"
 #include "executor.h"
 #include "parser.h"
 #include "test_helpers.h"
@@ -6,7 +7,16 @@
 
 #include <time.h>
 
+#ifdef _WIN32
+#include <io.h>
+#define bench_stderr_isatty() _isatty(_fileno(stderr))
+#else
+#include <unistd.h>
+#define bench_stderr_isatty() isatty(STDERR_FILENO)
+#endif
+
 #define BENCH_PATH_BUFFER_SIZE 1024
+#define BENCH_BAR_WIDTH 30
 
 typedef struct {
     TokenArray tokens;
@@ -15,6 +25,83 @@ typedef struct {
 
 static double now_ms(void) {
     return ((double) clock() * 1000.0) / (double) CLOCKS_PER_SEC;
+}
+
+static long bench_progress_step(long total) {
+    long candidate = total / 20L;
+
+    if (candidate < 1L) {
+        candidate = 1L;
+    }
+    if (candidate < 10000L) {
+        return 10000L;
+    }
+    if (candidate > 50000L) {
+        return 50000L;
+    }
+    return candidate;
+}
+
+static void bench_print_progress(const char *label, long current, long total, double started_ms) {
+    long filled = (current * BENCH_BAR_WIDTH) / total;
+    double elapsed_ms = now_ms() - started_ms;
+    int index;
+
+    if (filled > BENCH_BAR_WIDTH) {
+        filled = BENCH_BAR_WIDTH;
+    }
+
+    fprintf(stderr, "\r[BENCH] %-20s [", label);
+    for (index = 0; index < BENCH_BAR_WIDTH; index++) {
+        fputc(index < filled ? '#' : '.', stderr);
+    }
+    fprintf(
+        stderr,
+        "] %3ld%% (%ld/%ld) elapsed=%0.2fs",
+        (current * 100L) / total,
+        current,
+        total,
+        elapsed_ms / 1000.0
+    );
+    fflush(stderr);
+
+    if (current >= total) {
+        fputc('\n', stderr);
+    }
+}
+
+static void bench_report_periodic_progress(const char *label, long current, long total, double started_ms) {
+    fprintf(
+        stderr,
+        "[BENCH] %-20s %ld/%ld (%ld%%) elapsed=%0.2fs\n",
+        label,
+        current,
+        total,
+        (current * 100L) / total,
+        (now_ms() - started_ms) / 1000.0
+    );
+    fflush(stderr);
+}
+
+static void bench_update_progress(
+    const char *label,
+    long current,
+    long total,
+    long *last_reported,
+    double started_ms
+) {
+    long step = bench_progress_step(total);
+
+    if (current < total && current - *last_reported < step) {
+        return;
+    }
+
+    if (bench_stderr_isatty()) {
+        bench_print_progress(label, current, total, started_ms);
+    } else {
+        bench_report_periodic_progress(label, current, total, started_ms);
+    }
+    *last_reported = current;
 }
 
 static int parse_positive_int(const char *text, long *value) {
@@ -87,14 +174,18 @@ static int build_insert_sql(long row_count, char **out_sql, SqlError *error) {
     size_t length = 0;
     size_t capacity = 0;
     long row;
+    long last_reported = 0;
+    double started_ms = now_ms();
+
+    fprintf(stderr, "[BENCH] preparing insert workload for %ld rows\n", row_count);
+    fflush(stderr);
 
     for (row = 1; row <= row_count; row++) {
         char statement[256];
         int written = snprintf(
             statement,
             sizeof(statement),
-            "INSERT INTO users (id, name, age) VALUES (%ld, 'User_%ld', %ld);\n",
-            row,
+            "INSERT INTO users (name, age) VALUES ('User_%ld', %ld);\n",
             row,
             18L + (row % 50L)
         );
@@ -109,6 +200,7 @@ static int build_insert_sql(long row_count, char **out_sql, SqlError *error) {
             sql_set_error(error, 0, 0, "out of memory while building benchmark INSERT workload");
             return 0;
         }
+        bench_update_progress("build insert sql", row, row_count, &last_reported, started_ms);
     }
 
     *out_sql = sql;
@@ -120,7 +212,8 @@ static int create_empty_users_db(const char *db_root) {
         db_root,
         "table=users\n"
         "columns=id:int,name:string,age:int\n"
-        "pkey=id\n",
+        "pkey=id\n"
+        "autoincrement=true\n",
         ""
     );
 }
@@ -129,29 +222,43 @@ static int run_query_iterations(
     const ParsedSql *parsed,
     const char *db_root,
     long iterations,
+    const char *label,
     double *elapsed_ms,
     SqlError *error
 ) {
     long iteration;
     FILE *sink = tmpfile();
     double started;
+    DbContext *ctx = NULL;
+    long last_reported = 0;
 
     if (sink == NULL) {
         sql_set_error(error, 0, 0, "failed to create temporary benchmark sink");
         return 0;
     }
 
+    ctx = db_context_create(db_root, error);
+    if (ctx == NULL) {
+        fclose(sink);
+        return 0;
+    }
+
     started = now_ms();
+    fprintf(stderr, "[BENCH] running %s\n", label);
+    fflush(stderr);
     for (iteration = 0; iteration < iterations; iteration++) {
         rewind(sink);
-        if (!execute_query_list(&parsed->queries, db_root, sink, error)) {
+        if (!execute_query_list(&parsed->queries, ctx, sink, error)) {
+            db_context_destroy(ctx);
             fclose(sink);
             return 0;
         }
         clearerr(sink);
+        bench_update_progress(label, iteration + 1, iterations, &last_reported, started);
     }
     *elapsed_ms = now_ms() - started;
 
+    db_context_destroy(ctx);
     fclose(sink);
     return 1;
 }
@@ -161,7 +268,7 @@ static void print_metric(const char *label, double total_ms, long operations) {
         "[BENCH] %-24s total_ms=%9.3f avg_ms=%8.6f ops=%ld\n",
         label,
         total_ms,
-        total_ms / (double) operations,
+        operations > 0 ? total_ms / (double) operations : 0.0,
         operations
     );
 }
@@ -212,6 +319,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "error: %s\n", error.message);
         goto cleanup;
     }
+    fprintf(stderr, "[BENCH] parsing select workloads\n");
+    fflush(stderr);
     if (snprintf(select_id_sql, sizeof(select_id_sql), "SELECT * FROM users WHERE id = %ld;", row_count / 2L) >=
         (int) sizeof(select_id_sql)) {
         fprintf(stderr, "error: failed to format id benchmark query\n");
@@ -231,15 +340,15 @@ int main(int argc, char **argv) {
         goto cleanup;
     }
 
-    if (!run_query_iterations(&insert_workload, db_root, 1, &insert_elapsed_ms, &error)) {
+    if (!run_query_iterations(&insert_workload, db_root, 1, "bulk insert", &insert_elapsed_ms, &error)) {
         fprintf(stderr, "error: %s\n", error.message);
         goto cleanup;
     }
-    if (!run_query_iterations(&select_id_workload, db_root, iterations, &select_id_elapsed_ms, &error)) {
+    if (!run_query_iterations(&select_id_workload, db_root, iterations, "select where id", &select_id_elapsed_ms, &error)) {
         fprintf(stderr, "error: %s\n", error.message);
         goto cleanup;
     }
-    if (!run_query_iterations(&select_age_workload, db_root, iterations, &select_age_elapsed_ms, &error)) {
+    if (!run_query_iterations(&select_age_workload, db_root, iterations, "select where age", &select_age_elapsed_ms, &error)) {
         fprintf(stderr, "error: %s\n", error.message);
         goto cleanup;
     }

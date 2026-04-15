@@ -70,6 +70,8 @@ function Build-SqlProcessor {
         "src/parser.c",
         "src/schema.c",
         "src/storage.c",
+        "src/bptree.c",
+        "src/db_context.c",
         "src/executor.c",
         "src/utils.c"
     )
@@ -81,40 +83,42 @@ function Build-SqlProcessor {
 }
 
 function Build-UnitTests {
-    # ms: Unit binaries all share the production sources plus the Unity helpers.
+    # ms: Unit binaries mix plain main-based tests and Unity-based tests, so build them explicitly.
     $libSources = @(
         "src/cli.c",
         "src/tokenizer.c",
         "src/parser.c",
         "src/schema.c",
         "src/storage.c",
+        "src/bptree.c",
+        "src/db_context.c",
         "src/executor.c",
         "src/utils.c"
-    )
-    $supportSources = @(
-        "tests/support/unity.c",
-        "tests/support/test_helpers.c"
     )
 
     Build-NativeTarget `
         -OutputPath "tests/unit/test_tokenizer.exe" `
-        -Sources (@("tests/unit/test_tokenizer.c") + $libSources + $supportSources) `
-        -IncludeDirs @("include", "tests/support")
+        -Sources (@("tests/unit/test_tokenizer.c") + $libSources) `
+        -IncludeDirs @("include")
 
     Build-NativeTarget `
         -OutputPath "tests/unit/test_parser.exe" `
-        -Sources (@("tests/unit/test_parser.c") + $libSources + $supportSources) `
-        -IncludeDirs @("include", "tests/support")
+        -Sources (@("tests/unit/test_parser.c") + $libSources) `
+        -IncludeDirs @("include")
 
     Build-NativeTarget `
         -OutputPath "tests/unit/test_storage.exe" `
-        -Sources (@("tests/unit/test_storage.c") + $libSources + $supportSources) `
+        -Sources (@(
+            "tests/unit/test_storage.c",
+            "tests/support/unity.c",
+            "tests/support/test_helpers.c"
+        ) + $libSources) `
         -IncludeDirs @("include", "tests/support")
 
     Build-NativeTarget `
         -OutputPath "tests/unit/test_executor.exe" `
-        -Sources (@("tests/unit/test_executor.c") + $libSources + $supportSources) `
-        -IncludeDirs @("include", "tests/support")
+        -Sources (@("tests/unit/test_executor.c") + $libSources) `
+        -IncludeDirs @("include")
 }
 
 function Build-VerifyTarget {
@@ -125,6 +129,8 @@ function Build-VerifyTarget {
         "src/parser.c",
         "src/schema.c",
         "src/storage.c",
+        "src/bptree.c",
+        "src/db_context.c",
         "src/executor.c",
         "src/utils.c"
     )
@@ -144,7 +150,9 @@ function Build-BptreeContract {
         -OutputPath "tests/unit/test_bptree_contract.exe" `
         -Sources @(
             "tests/unit/test_bptree_contract.c",
-            "tests/support/unity.c"
+            "tests/support/unity.c",
+            "src/bptree.c",
+            "src/utils.c"
         ) `
         -IncludeDirs @("include", "tests/support")
 }

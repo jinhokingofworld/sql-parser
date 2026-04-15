@@ -281,6 +281,22 @@ static int verify_dataset_file(
     return 1;
 }
 
+static void print_verify_failure(
+    const char *csv_path,
+    long expected_rows,
+    long start_id,
+    const char *message,
+    double elapsed_ms
+) {
+    fprintf(stderr, "[VERIFY FAIL] students dataset\n");
+    fprintf(stderr, "  file: %s\n", csv_path);
+    fprintf(stderr, "  expected_rows: %ld\n", expected_rows);
+    fprintf(stderr, "  start_id: %ld\n", start_id);
+    fprintf(stderr, "  reason:\n");
+    fprintf(stderr, "    %s\n", message);
+    fprintf(stderr, "  elapsed_ms: %.2f\n", elapsed_ms);
+}
+
 int main(int argc, char **argv) {
     DatasetStats stats = {{0, 0, 0, 0}, 0, 0, 0.0, 0.0};
     char message[256];
@@ -307,10 +323,7 @@ int main(int argc, char **argv) {
     ok = verify_dataset_file(argv[1], expected_rows, start_id, &stats, message, sizeof(message));
     elapsed_ms = ((double) (clock() - started) * 1000.0) / (double) CLOCKS_PER_SEC;
     if (!ok) {
-        fprintf(stderr, "[VERIFY FAIL] students dataset\n");
-        fprintf(stderr, "  file: %s\n", argv[1]);
-        fprintf(stderr, "  detail: %s\n", message);
-        fprintf(stderr, "  elapsed_ms: %.2f\n", elapsed_ms);
+        print_verify_failure(argv[1], expected_rows, start_id, message, elapsed_ms);
         return 1;
     }
 

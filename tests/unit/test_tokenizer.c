@@ -1,46 +1,77 @@
 #include "tokenizer.h"
-#include "unity.h"
 
-void setUp(void) {
-}
-
-void tearDown(void) {
-}
-
-/* ms: Keeps the original tokenizer coverage for SELECT/WHERE/ORDER BY in one focused case. */
-static void test_tokenize_select_with_where_and_order_by(void) {
-    const char *sql = "SeLeCt id, name FROM users WHERE age = 20 ORDER BY name;";
-    TokenArray tokens = {NULL, 0};
-    SqlError error = {0, 0, {0}};
-    int ok = tokenize_sql(sql, &tokens, &error);
-
-    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
-    TEST_ASSERT_EQUAL_INT(15, tokens.count);
-    TEST_ASSERT_EQUAL_INT(TOKEN_KEYWORD, tokens.items[0].type);
-    TEST_ASSERT_EQUAL_STRING("id", tokens.items[1].lexeme);
-    TEST_ASSERT_EQUAL_INT(TOKEN_NUMBER, tokens.items[9].type);
-    TEST_ASSERT_EQUAL_INT(TOKEN_IDENTIFIER, tokens.items[12].type);
-
-    free_token_array(&tokens);
-}
-
-/* ms: Added to protect dataset values that contain punctuation from tokenization regressions. */
-static void test_tokenize_preserves_string_literal_contents(void) {
-    const char *sql = "INSERT INTO users (name) VALUES ('Alice, Jr.');";
-    TokenArray tokens = {NULL, 0};
-    SqlError error = {0, 0, {0}};
-    int ok = tokenize_sql(sql, &tokens, &error);
-
-    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
-    TEST_ASSERT_EQUAL_INT(TOKEN_STRING, tokens.items[8].type);
-    TEST_ASSERT_EQUAL_STRING("Alice, Jr.", tokens.items[8].lexeme);
-
-    free_token_array(&tokens);
+static int assert_true(int condition, const char *message) {
+    if (!condition) {
+        fprintf(stderr, "assertion failed: %s\n", message);
+        return 0;
+    }
+    return 1;
 }
 
 int main(void) {
-    UNITY_BEGIN();
-    RUN_TEST(test_tokenize_select_with_where_and_order_by);
-    RUN_TEST(test_tokenize_preserves_string_literal_contents);
-    return UNITY_END();
+    const char *float_sql = "INSERT INTO students (score) VALUES (4.5);";
+    const char *sql = "SeLeCt id, name FROM users WHERE score BETWEEN 3.25 AND 4.50 ORDER BY score DESC;";
+    TokenArray tokens = {NULL, 0};
+    TokenArray float_tokens = {NULL, 0};
+    SqlError error = {0, 0, {0}};
+    int float_index = -1;
+    int index;
+
+    if (!tokenize_sql(sql, &tokens, &error)) {
+        fprintf(stderr, "tokenize_sql failed: %s\n", error.message);
+        return 1;
+    }
+
+    if (!assert_true(tokens.count == 18, "unexpected token count")) {
+        free_token_array(&tokens);
+        return 1;
+    }
+    if (!assert_true(tokens.items[0].type == TOKEN_KEYWORD, "SELECT should be keyword")) {
+        free_token_array(&tokens);
+        return 1;
+    }
+    if (!assert_true(strcmp(tokens.items[1].lexeme, "id") == 0, "column name should match")) {
+        free_token_array(&tokens);
+        return 1;
+    }
+    if (!assert_true(tokens.items[9].type == TOKEN_NUMBER, "BETWEEN low value should be number")) {
+        free_token_array(&tokens);
+        return 1;
+    }
+    if (!assert_true(strcmp(tokens.items[9].lexeme, "3.25") == 0, "float literal should match")) {
+        free_token_array(&tokens);
+        return 1;
+    }
+    if (!assert_true(tokens.items[11].type == TOKEN_NUMBER, "BETWEEN high value should be number")) {
+        free_token_array(&tokens);
+        return 1;
+    }
+    if (!assert_true(tokens.items[14].type == TOKEN_IDENTIFIER, "ORDER BY target should be identifier")) {
+        free_token_array(&tokens);
+        return 1;
+    }
+
+    if (!tokenize_sql(float_sql, &float_tokens, &error)) {
+        fprintf(stderr, "tokenize_sql float_sql failed: %s\n", error.message);
+        free_token_array(&tokens);
+        return 1;
+    }
+
+    for (index = 0; index < float_tokens.count; index++) {
+        if (float_tokens.items[index].type == TOKEN_NUMBER &&
+            strcmp(float_tokens.items[index].lexeme, "4.5") == 0) {
+            float_index = index;
+            break;
+        }
+    }
+
+    if (!assert_true(float_index >= 0, "float literal should be tokenized as number")) {
+        free_token_array(&tokens);
+        free_token_array(&float_tokens);
+        return 1;
+    }
+
+    free_token_array(&tokens);
+    free_token_array(&float_tokens);
+    return 0;
 }

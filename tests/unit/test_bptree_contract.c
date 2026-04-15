@@ -1,29 +1,11 @@
 #include "unity.h"
+#include "bptree_test_adapter.h"
 
 /*
  * ms: This suite is intentionally adapter-driven so the incoming B+ Tree API
- * can be mapped here without forcing immediate changes in the shared test
- * harness. To enable these tests, add tests/support/bptree_test_adapter.h.
+ * can be mapped here without forcing test changes when the production B+ Tree
+ * API shifts.
  */
-
-#if defined(__has_include)
-#if __has_include("bptree_test_adapter.h")
-#include "bptree_test_adapter.h"
-#define BPTREE_TESTS_AVAILABLE 1
-#else
-#define BPTREE_TESTS_AVAILABLE 0
-#endif
-#else
-#define BPTREE_TESTS_AVAILABLE 0
-#endif
-
-void setUp(void) {
-}
-
-void tearDown(void) {
-}
-
-#if BPTREE_TESTS_AVAILABLE
 
 /* ms: Keep the handle global so each test can rebuild a fresh tree through the adapter. */
 static BptreeTestHandle g_tree = NULL;
@@ -88,25 +70,11 @@ static void test_many_inserts_remain_searchable(void) {
     }
 }
 
-#else
-
-/* ms: Before the B+ Tree lands, keep this target green with an explicit skip marker. */
-static void test_bptree_contract_waits_for_adapter(void) {
-    printf("[SKIP] add tests/support/bptree_test_adapter.h to enable B+ Tree contract tests\n");
-    TEST_ASSERT_TRUE(1);
-}
-
-#endif
-
 int main(void) {
-    /* ms: Drive either the real contract suite or the explicit skip placeholder. */
+    /* ms: Drive the adapter-backed contract suite against the real B+ Tree implementation. */
     UNITY_BEGIN();
-#if BPTREE_TESTS_AVAILABLE
     RUN_TEST(test_insert_then_find_single_key);
     RUN_TEST(test_find_missing_key_returns_not_found);
     RUN_TEST(test_many_inserts_remain_searchable);
-#else
-    RUN_TEST(test_bptree_contract_waits_for_adapter);
-#endif
     return UNITY_END();
 }
