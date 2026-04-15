@@ -11,6 +11,7 @@ typedef struct {
 typedef struct {
     Row *rows;
     int row_count;
+    int row_capacity;
     int column_count;
 } RowSet;
 
@@ -28,6 +29,7 @@ int read_csv_rows(
     RowSet *rowset,
     SqlError *error
 );
+int rowset_reserve(RowSet *rowset, int min_capacity, SqlError *error);
 void free_rowset(RowSet *rowset);
 
 #endif

@@ -23,6 +23,8 @@ static void free_select_query(SelectQuery *query) {
     free(query->columns);
     free(query->where.column);
     free(query->where.value.raw);
+    free(query->where.low.raw);
+    free(query->where.high.raw);
     free(query->order_by.column);
 }
 
@@ -212,12 +214,22 @@ void print_query(const Query *query, FILE *out) {
     }
 
     if (query->select_query.has_where) {
-        fprintf(
-            out,
-            " where=%s=%s",
-            query->select_query.where.column,
-            query->select_query.where.value.raw
-        );
+        if (query->select_query.where.type == COND_BETWEEN) {
+            fprintf(
+                out,
+                " where=%s BETWEEN %s AND %s",
+                query->select_query.where.column,
+                query->select_query.where.low.raw,
+                query->select_query.where.high.raw
+            );
+        } else {
+            fprintf(
+                out,
+                " where=%s=%s",
+                query->select_query.where.column,
+                query->select_query.where.value.raw
+            );
+        }
     }
 
     if (query->select_query.has_order_by) {

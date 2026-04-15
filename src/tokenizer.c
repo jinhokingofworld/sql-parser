@@ -11,6 +11,8 @@ static const KeywordEntry KEYWORDS[] = {
     {"SELECT"},
     {"FROM"},
     {"WHERE"},
+    {"BETWEEN"},
+    {"AND"},
     {"ORDER"},
     {"BY"},
     {"ASC"},
@@ -245,6 +247,7 @@ int tokenize_sql(const char *sql, TokenArray *tokens, SqlError *error) {
             (sql[position] == '-' && isdigit((unsigned char) sql[position + 1]))) {
             size_t start = position;
             int start_column = column;
+            int has_fraction = 0;
 
             if (sql[position] == '-') {
                 position++;
@@ -254,6 +257,22 @@ int tokenize_sql(const char *sql, TokenArray *tokens, SqlError *error) {
             while (isdigit((unsigned char) sql[position])) {
                 position++;
                 column++;
+            }
+
+            if (sql[position] == '.' && isdigit((unsigned char) sql[position + 1])) {
+                has_fraction = 1;
+                position++;
+                column++;
+                while (isdigit((unsigned char) sql[position])) {
+                    position++;
+                    column++;
+                }
+            }
+
+            if (!has_fraction && sql[position] == '.') {
+                sql_set_error(error, line, column, "expected digits after decimal point");
+                free_token_array_on_failure(tokens);
+                return 0;
             }
 
             if (!append_token(tokens, TOKEN_NUMBER, sql + start, position - start, line, start_column, error)) {
