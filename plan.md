@@ -160,19 +160,27 @@ ok reproducible_sample_valid
 5. 기존 SQL `INSERT` 경로를 그대로 1,000,000번 호출하는 방식은 피한다.
 6. 이유는 현재 `INSERT`가 매번 전체 테이블을 읽어 primary key 중복을 검사하므로 O(n^2)에 가까운 비용이 발생하기 때문이다.
 7. bulk loader는 적재 전 중복 id 검사를 한 번만 수행하거나, 생성기가 보장하는 순차 id를 신뢰하는 fast path를 제공한다.
+8. 단, index 유무에 따른 SQL `INSERT` 성능 비교는 테이블 CSV에 직접 쓰는 loader가 아니라 실제 SQL statement를 실행하는 loader가 필요하다.
+9. 따라서 loader 역할을 둘로 나눈다.
+   - `tools/load_students_csv.py`: 빠른 데이터 세팅용 direct CSV loader
+   - `tools/load_students_sql.py`: index 없음/있음 INSERT 성능 측정용 SQL INSERT loader
 
 진행 상태:
 - [x] `float` 타입 지원
 > 팀원이 제공한 float 지원 코드를 merge했고, `make test`와 students 조회 테스트로 확인했다.
 - [x] `students` 스키마 추가
-- [x] loader는 header 없는 CSV를 입력으로 받는 방향을 유지한다.
+- [x] direct loader는 header 없는 CSV를 입력으로 받는 방향을 유지한다.
 - [x] `tools/load_students_csv.py` 작성 완료
-- [x] loader는 `score:float`를 검증한다.
-- [x] `--input`, `--db-root`, `--table`, `--truncate`, `--batch-size` 옵션 구현
-- [x] 생성기가 보장하는 순차 primary key를 빠르게 검증하는 `--trust-sequential-pk` 옵션 구현
-- [x] loader 문법 검증 완료: `python3 -m py_compile tools/load_students_csv.py`
-- [x] loader CLI 확인 완료: `python3 tools/load_students_csv.py --help`
-- [x] 실제 적재 테스트는 C float 타입 지원 코드 merge 후 진행 완료
+- [x] direct loader는 `score:float`를 검증한다.
+- [x] direct loader 옵션 구현: `--input`, `--db-root`, `--table`, `--truncate`, `--batch-size`, `--trust-sequential-pk`
+- [x] direct loader 문법 검증 완료: `python3 -m py_compile tools/load_students_csv.py`
+- [x] direct loader CLI 확인 완료: `python3 tools/load_students_csv.py --help`
+- [x] direct loader 실제 적재 테스트는 C float 타입 지원 코드 merge 후 진행 완료
+- [x] SQL INSERT loader 필요성 확인: index 유무에 따른 INSERT 성능 비교는 SQL 실행 경로를 타야 한다.
+- [x] `tools/load_students_sql.py` 작성 완료
+- [x] SQL INSERT loader 문법 검증 완료: `python3 -m py_compile tools/load_students_sql.py`
+- [x] SQL INSERT loader CLI 확인 완료: `python3 tools/load_students_sql.py --help`
+- [x] SQL INSERT loader 10건 샘플 적재와 조회 검증 완료
 
 ### 6. 삽입기 검증
 
@@ -198,7 +206,7 @@ ok reproducible_sample_valid
 
 검증 결과:
 - `make test` 통과
-- 10건 적재 후 `data/tables/students.csv` line count 10 확인
+- direct loader로 10건 적재 후 `data/tables/students.csv` line count 10 확인
 - 10,000건 적재 후 `/tmp` DB line count 10,000 확인
 - 100,000건 적재 후 `/tmp` DB line count 100,000 확인
 - 1,000,000건 적재 후 `/tmp` DB line count 1,000,000 확인
@@ -206,6 +214,9 @@ ok reproducible_sample_valid
 - 1,000,000건 적재 시간: 약 1.81초
 - 1,000,000건에서 `SELECT id, name, score FROM students WHERE id = 500000;` 결과 1건 확인
 - 1,000,000건에서 `SELECT id, name, score FROM students WHERE score = 4.31;` 결과 2,257건 확인
+- SQL INSERT loader로 10건 적재 후 `/tmp` DB line count 10 확인
+- SQL INSERT loader로 적재한 10건에서 `SELECT id, name, score FROM students WHERE id = 1;` 결과 1건 확인
+- SQL INSERT loader로 적재한 10건에서 `SELECT id, name, score FROM students WHERE score = 4.31;` 결과 1건 확인
 
 ### 7. 현재 SQL 엔진의 대량 데이터 병목 정리
 
@@ -254,12 +265,14 @@ SELECT * FROM students ORDER BY id;
 - [x] `tools/generate_students_csv.py` 작성
 - [x] 소량 샘플 데이터 생성 테스트
 - [x] `tools/load_students_csv.py` 작성
-- [x] 삽입기는 `score:float` 지원에 맞춰 작성
+- [x] direct 삽입기는 `score:float` 지원에 맞춰 작성
+- [x] SQL INSERT 삽입기는 `score:float` 지원에 맞춰 작성
 - [x] 삽입기 문법/CLI 확인
 - [x] 팀원 float 타입 지원 코드 merge
 - [x] 소량 CSV bulk load 테스트
 - [x] 10,000건 bulk load 테스트
 - [x] 100,000건 bulk load 테스트
 - [x] 1,000,000건 bulk load 테스트
+- [ ] index 없음/있음 SQL INSERT 성능 측정
 - [ ] full scan 기준 성능 측정
 - [ ] B+Tree 인덱스 설계와 적용 작업으로 넘어가기

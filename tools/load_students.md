@@ -1,6 +1,8 @@
 # Student CSV Bulk Loader
 
-`load_students_csv.py`는 생성된 row-only 학생 CSV를 파일 DB의 테이블 CSV로 적재한다.
+`load_students_csv.py`는 생성된 row-only 학생 CSV를 파일 DB의 테이블 CSV로 직접 적재한다.
+
+이 도구는 대량 데이터를 빠르게 준비하기 위한 direct loader다. SQL `INSERT` 실행 경로와 index 갱신 비용을 측정하려면 `tools/load_students_sql.py`를 사용한다.
 
 기본 대상은 아래 파일이다.
 
