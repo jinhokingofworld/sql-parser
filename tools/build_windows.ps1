@@ -73,7 +73,8 @@ function Build-SqlProcessor {
         "src/bptree.c",
         "src/db_context.c",
         "src/executor.c",
-        "src/utils.c"
+        "src/utils.c",
+        "src/bench.c"
     )
 
     Build-NativeTarget `
@@ -93,7 +94,8 @@ function Build-UnitTests {
         "src/bptree.c",
         "src/db_context.c",
         "src/executor.c",
-        "src/utils.c"
+        "src/utils.c",
+        "src/bench.c"
     )
 
     Build-NativeTarget `
@@ -132,7 +134,8 @@ function Build-VerifyTarget {
         "src/bptree.c",
         "src/db_context.c",
         "src/executor.c",
-        "src/utils.c"
+        "src/utils.c",
+        "src/bench.c"
     )
 
     Build-NativeTarget `

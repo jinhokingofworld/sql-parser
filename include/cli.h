@@ -6,6 +6,7 @@
 typedef struct {
     const char *sql_path;
     const char *db_root;
+    long bench_rows;
     int explain;
 } CliOptions;
 

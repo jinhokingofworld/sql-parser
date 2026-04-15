@@ -7,7 +7,6 @@ data/generated/
 .vscode/
 .idea/
 tests/tmp/
-.devcontainer/
 
 # Native build outputs
 *.exe

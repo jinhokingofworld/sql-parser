@@ -3,7 +3,7 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Werror -pedantic -Iinclude
 PYTHON ?= python3
 
 TARGET := sql_processor
-LIB_SRCS := src/cli.c src/tokenizer.c src/parser.c src/schema.c src/storage.c src/bptree.c src/db_context.c src/executor.c src/utils.c
+LIB_SRCS := src/cli.c src/tokenizer.c src/parser.c src/schema.c src/storage.c src/bptree.c src/db_context.c src/executor.c src/utils.c src/bench.c
 UNIT_TEST_BINS := tests/unit/test_tokenizer tests/unit/test_parser tests/unit/test_storage tests/unit/test_executor
 TEST_SUPPORT_SRCS := tests/support/unity.c tests/support/test_helpers.c
 BPTREE_TEST_BINS := tests/unit/test_bptree_contract
