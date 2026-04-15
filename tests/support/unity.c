@@ -6,6 +6,22 @@ static int g_total_tests = 0;
 static int g_failed_tests = 0;
 static int g_current_test_failed = 0;
 
+/* ms: Keep suite labels short by printing the basename instead of the full path. */
+static const char *unity_basename(const char *path) {
+    const char *last_slash = strrchr(path, '/');
+    const char *last_backslash = strrchr(path, '\\');
+    const char *candidate = path;
+
+    if (last_slash != NULL && last_slash[1] != '\0') {
+        candidate = last_slash + 1;
+    }
+    if (last_backslash != NULL && last_backslash[1] != '\0' && last_backslash + 1 > candidate) {
+        candidate = last_backslash + 1;
+    }
+
+    return candidate;
+}
+
 /* ms: Print optional assertion context without forcing every assertion to carry text. */
 static void unity_print_message(const char *file, int line, const char *message) {
     if (message != NULL && message[0] != '\0') {
@@ -19,12 +35,12 @@ void UnityBegin(const char *suite_name) {
     g_total_tests = 0;
     g_failed_tests = 0;
     g_current_test_failed = 0;
-    printf("== %s ==\n", g_current_suite);
+    printf("[TEST SUITE] %s\n", unity_basename(g_current_suite));
 }
 
 /* ms: Keep the runner output compact so the existing Makefile-driven workflow stays readable. */
 int UnityEnd(void) {
-    printf("-- %d tests, %d failures --\n", g_total_tests, g_failed_tests);
+    printf("[RESULT] total=%d passed=%d failed=%d\n", g_total_tests, g_total_tests - g_failed_tests, g_failed_tests);
     return g_failed_tests == 0 ? 0 : 1;
 }
 
@@ -33,11 +49,11 @@ void UnityDefaultTestRun(UnityTestFunction func, const char *name, int line) {
     extern void setUp(void);
     extern void tearDown(void);
 
+    (void) line;
     g_total_tests++;
     g_current_test = name;
     g_current_test_failed = 0;
 
-    printf("[RUN] %s (line %d)\n", name, line);
     setUp();
     func();
     tearDown();

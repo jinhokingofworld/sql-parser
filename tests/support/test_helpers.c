@@ -73,12 +73,14 @@ int test_write_text_file(const char *path, const char *text) {
     return 1;
 }
 
-/* ms: Test fixtures create schema and table files directly instead of depending on external setup scripts. */
-int test_create_users_db(const char *db_root, const char *schema_text, const char *csv_text) {
+/* ms: Test fixtures can now target arbitrary table names so dataset tests are not locked to users. */
+int test_create_table_db(const char *db_root, const char *table_name, const char *schema_text, const char *csv_text) {
     char schema_dir[1024];
     char table_dir[1024];
     char schema_path[1024];
     char table_path[1024];
+    char schema_filename[256];
+    char table_filename[256];
 
     if (!test_create_db_layout(db_root, 1, 1)) {
         return 0;
@@ -89,10 +91,16 @@ int test_create_users_db(const char *db_root, const char *schema_text, const cha
     if (!test_build_path(table_dir, sizeof(table_dir), db_root, "tables")) {
         return 0;
     }
-    if (!test_build_path(schema_path, sizeof(schema_path), schema_dir, "users.schema")) {
+    if (snprintf(schema_filename, sizeof(schema_filename), "%s.schema", table_name) >= (int) sizeof(schema_filename)) {
         return 0;
     }
-    if (!test_build_path(table_path, sizeof(table_path), table_dir, "users.csv")) {
+    if (snprintf(table_filename, sizeof(table_filename), "%s.csv", table_name) >= (int) sizeof(table_filename)) {
+        return 0;
+    }
+    if (!test_build_path(schema_path, sizeof(schema_path), schema_dir, schema_filename)) {
+        return 0;
+    }
+    if (!test_build_path(table_path, sizeof(table_path), table_dir, table_filename)) {
         return 0;
     }
 
@@ -100,12 +108,14 @@ int test_create_users_db(const char *db_root, const char *schema_text, const cha
         test_write_text_file(table_path, csv_text);
 }
 
-/* ms: Cleanup matches the users fixture shape used by current unit tests. */
-void test_cleanup_users_db(const char *db_root) {
+/* ms: Cleanup follows the table-specific fixture path so temporary schema/table files do not leak. */
+void test_cleanup_table_db(const char *db_root, const char *table_name) {
     char schema_dir[1024];
     char table_dir[1024];
     char schema_path[1024];
     char table_path[1024];
+    char schema_filename[256];
+    char table_filename[256];
 
     if (!test_build_path(schema_dir, sizeof(schema_dir), db_root, "schema")) {
         return;
@@ -113,10 +123,16 @@ void test_cleanup_users_db(const char *db_root) {
     if (!test_build_path(table_dir, sizeof(table_dir), db_root, "tables")) {
         return;
     }
-    if (!test_build_path(schema_path, sizeof(schema_path), schema_dir, "users.schema")) {
+    if (snprintf(schema_filename, sizeof(schema_filename), "%s.schema", table_name) >= (int) sizeof(schema_filename)) {
         return;
     }
-    if (!test_build_path(table_path, sizeof(table_path), table_dir, "users.csv")) {
+    if (snprintf(table_filename, sizeof(table_filename), "%s.csv", table_name) >= (int) sizeof(table_filename)) {
+        return;
+    }
+    if (!test_build_path(schema_path, sizeof(schema_path), schema_dir, schema_filename)) {
+        return;
+    }
+    if (!test_build_path(table_path, sizeof(table_path), table_dir, table_filename)) {
         return;
     }
 
@@ -125,4 +141,14 @@ void test_cleanup_users_db(const char *db_root) {
     rmdir(schema_dir);
     rmdir(table_dir);
     rmdir(db_root);
+}
+
+/* ms: Compatibility wrapper keeps older users-based tests working while new dataset tests move to students. */
+int test_create_users_db(const char *db_root, const char *schema_text, const char *csv_text) {
+    return test_create_table_db(db_root, "users", schema_text, csv_text);
+}
+
+/* ms: Compatibility wrapper keeps existing cleanup calls unchanged for legacy users tests. */
+void test_cleanup_users_db(const char *db_root) {
+    test_cleanup_table_db(db_root, "users");
 }
