@@ -118,7 +118,7 @@ static void cleanup_temp_db(const char *db_root) {
     unlink(student_schema_path);
     unlink(student_table_path);
     rmdir(schema_dir);
-    rmdir(table_dir);
+    rmdir(table_path);
     rmdir(db_root);
 }
 
