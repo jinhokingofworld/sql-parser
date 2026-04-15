@@ -3,8 +3,8 @@
 ## 현재 코드베이스와 DB 상태 확인
 
 - 현재 프로젝트는 C 기반 파일 DB이며, `data/schema/<table>.schema`와 `data/tables/<table>.csv`를 사용한다.
-- 현재 기본 테이블은 `users`이고, 스키마 파일은 `data/schema/users.schema`에 있다.
-- 현재 `users` 스키마는 아래 3개 컬럼만 가진다.
+- 기본 예제 테이블은 `users`이고, 스키마 파일은 `data/schema/users.schema`에 있다.
+- `users` 스키마는 아래 3개 컬럼만 가진다.
 
 ```text
 table=users
@@ -12,10 +12,20 @@ columns=id:int,name:string,age:int
 pkey=id
 ```
 
-- 현재 실제 데이터 파일인 `data/tables/users.csv`는 비어 있다.
+- 현재 대량 테스트용 `students` 테이블 스키마와 빈 테이블 파일을 추가했다.
+
+```text
+table=students
+columns=id:int,name:string,grade:int,age:int,region:string,score:float
+pkey=id
+```
+
+- 현재 `data/tables/users.csv`와 `data/tables/students.csv`는 비어 있다.
 - `src/storage.c`는 CSV 파일을 append/read 하는 구조이고, `read_csv_rows()`는 CSV 전체를 메모리에 읽는다.
 - `src/executor.c`의 `INSERT`는 primary key 중복 확인을 위해 매 insert마다 전체 CSV를 읽는다.
-- 현재 타입 시스템은 `int`, `string`만 지원한다. 요청 데이터 구조의 `score:float`를 쓰려면 `float` 타입 지원을 추가하거나, 임시로 `score`를 `string`으로 저장하는 선택이 필요하다.
+- 현재 C 타입 시스템은 `int`, `string`만 지원한다.
+- `score:float`는 실제 float 타입으로 사용하기로 결정했으며, C 코드의 float 타입 지원은 팀원 코드 merge 후 확인한다.
+- 이번 bulk loader는 float 타입이 지원된다는 전제로 `students.schema`의 `score:float`를 읽고 입력 CSV의 float 값을 검증한다.
 
 ## 목표 데이터 구조
 
@@ -65,8 +75,8 @@ pkey=id
 >테스트는 다른 팀원에게 맡겨놔서, 제외해도 돼.
 
 진행 상태:
-- [ ] `data/schema/students.schema` 추가
-- [ ] `data/tables/students.csv` 추가
+- [x] `data/schema/students.schema` 추가
+- [x] `data/tables/students.csv` 추가
 - [x] 테스트 fixture 추가는 이번 작업 범위에서 제외하기로 결정했다.
 
 ### 3. Python 데이터 생성기 작성
@@ -153,8 +163,16 @@ ok reproducible_sample_valid
 
 진행 상태:
 - [ ] `float` 타입 지원
-- [ ] `students` 스키마 추가
-- [ ] loader는 header 없는 CSV를 입력으로 받는 방향을 유지한다.
+> 이걸 다른 팀원이 해주기로 했어. float타입이 지원된다는 것을 가정하고, 데이터 작성기를 만들면 좋을 것 같아.
+- [x] `students` 스키마 추가
+- [x] loader는 header 없는 CSV를 입력으로 받는 방향을 유지한다.
+- [x] `tools/load_students_csv.py` 작성 완료
+- [x] loader는 `float` 타입이 지원된다는 전제로 `score:float`를 검증한다.
+- [x] `--input`, `--db-root`, `--table`, `--truncate`, `--batch-size` 옵션 구현
+- [x] 생성기가 보장하는 순차 primary key를 빠르게 검증하는 `--trust-sequential-pk` 옵션 구현
+- [x] loader 문법 검증 완료: `python3 -m py_compile tools/load_students_csv.py`
+- [x] loader CLI 확인 완료: `python3 tools/load_students_csv.py --help`
+- [ ] 실제 적재 테스트는 팀원의 C float 타입 지원 코드 merge 후 진행한다.
 
 ### 6. 삽입기 검증
 
@@ -163,6 +181,19 @@ ok reproducible_sample_valid
 3. 1,000,000건 적재 전에 10,000건, 100,000건으로 단계 테스트한다.
 4. 적재 후 line count가 기대값과 같은지 확인한다.
 5. 잘못된 컬럼 개수, 잘못된 타입, 중복 id 입력에 대한 실패 케이스를 확인한다.
+
+진행 상태:
+- [x] 삽입기 검증은 C float 타입 지원 코드가 merge된 뒤 진행하기로 결정했다.
+- [ ] 10건 샘플 CSV bulk load 테스트
+- [ ] `SELECT * FROM students;` 조회 테스트
+- [ ] `SELECT id, name FROM students WHERE id = 1;` 조회 테스트
+- [ ] 10,000건 bulk load 테스트
+- [ ] 100,000건 bulk load 테스트
+- [ ] 1,000,000건 bulk load 테스트
+- [ ] line count 검증
+- [ ] 잘못된 컬럼 개수 실패 케이스 검증
+- [ ] 잘못된 타입 실패 케이스 검증
+- [ ] 중복 id 실패 케이스 검증
 
 ### 7. 현재 SQL 엔진의 대량 데이터 병목 정리
 
@@ -200,17 +231,20 @@ SELECT * FROM students ORDER BY id;
 진행 상태:
 - [x] `.gitignore`에 `data/generated/` 추가
 - [x] `.gitignore`에 Python 생성물인 `__pycache__/`, `*.pyc` 추가
-- [ ] README에 대량 데이터 생성 방법 추가
-- [ ] README에 bulk load 방법 추가
+- [x] README에 대량 데이터 생성 방법 추가
+- [x] README에 bulk load 방법 추가
 - [ ] `docs/performance.md` 작성
 
 ## 우선 구현 체크리스트
 
 - [x] `float` 타입 지원 여부 결정
-- [ ] `students` 스키마 추가
+- [x] `students` 스키마 추가
 - [x] `tools/generate_students_csv.py` 작성
 - [x] 소량 샘플 데이터 생성 테스트
-- [ ] `tools/load_students_csv.py` 작성
+- [x] `tools/load_students_csv.py` 작성
+- [x] 삽입기는 `score:float` 지원을 가정하고 작성
+- [x] 삽입기 문법/CLI 확인
+- [ ] 팀원 float 타입 지원 코드 merge
 - [ ] 소량 CSV bulk load 테스트
 - [ ] 10,000건 bulk load 테스트
 - [ ] 100,000건 bulk load 테스트
