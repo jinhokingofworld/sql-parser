@@ -32,31 +32,15 @@ static void test_parse_insert_followed_by_select(void) {
     TEST_ASSERT_EQUAL_STRING("age", queries.items[1]->select_query.where.column);
     TEST_ASSERT_TRUE(queries.items[1]->select_query.has_order_by);
 
-    if (!tokenize_sql(float_sql, &float_tokens, &error)) {
-        fprintf(stderr, "tokenize_sql float_sql failed: %s\n", error.message);
-        free_query_list(&queries);
-        free_token_array(&tokens);
-        return 1;
-    }
+    ok = tokenize_sql(float_sql, &float_tokens, &error);
+    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
+    ok = parse_queries(&float_tokens, &float_queries, &error);
+    TEST_ASSERT_TRUE_MESSAGE(ok, error.message);
 
-    if (!parse_queries(&float_tokens, &float_queries, &error)) {
-        fprintf(stderr, "parse_queries float_sql failed: %s\n", error.message);
-        free_query_list(&queries);
-        free_token_array(&tokens);
-        free_token_array(&float_tokens);
-        return 1;
-    }
-
-    ok &= assert_true(float_queries.count == 1, "expected one float statement");
-    ok &= assert_true(float_queries.items[0]->select_query.has_where == 1, "float WHERE clause missing");
-    ok &= assert_true(
-        float_queries.items[0]->select_query.where.value.type == VALUE_FLOAT,
-        "float WHERE value type mismatch"
-    );
-    ok &= assert_true(
-        strcmp(float_queries.items[0]->select_query.where.value.raw, "3.75") == 0,
-        "float WHERE value raw mismatch"
-    );
+    TEST_ASSERT_EQUAL_INT(1, float_queries.count);
+    TEST_ASSERT_TRUE(float_queries.items[0]->select_query.has_where);
+    TEST_ASSERT_EQUAL_INT(VALUE_FLOAT, float_queries.items[0]->select_query.where.value.type);
+    TEST_ASSERT_EQUAL_STRING("3.75", float_queries.items[0]->select_query.where.value.raw);
 
     free_query_list(&float_queries);
     free_token_array(&float_tokens);

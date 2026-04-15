@@ -2,6 +2,36 @@
 __pycache__/
 *.pyc
 data/generated/
+
+# Editor and local environment
 .vscode/
+.idea/
 tests/tmp/
+.devcontainer/
+
+# Native build outputs
 *.exe
+*.out
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.pdb
+*.ilk
+compile_commands.json
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+Makefile.local
+
+# Project-local binaries
+/sql_processor
+/tests/unit/test_tokenizer
+/tests/unit/test_parser
+/tests/unit/test_storage
+/tests/unit/test_executor
+/tests/verify/verify_students_dataset

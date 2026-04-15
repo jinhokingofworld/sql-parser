@@ -1,3 +1,0 @@
-table=users
-columns=id:int,name:string,grade:int,age:int,region:char[],score:float
-pkey=id

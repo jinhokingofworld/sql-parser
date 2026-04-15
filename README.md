@@ -319,3 +319,20 @@ make integration
 ```bash
 make test
 ```
+
+Windows PowerShell:
+
+```powershell
+.\tools\build_windows.ps1
+.\tools\test_windows.ps1 -Build
+```
+
+Windows suite examples:
+
+```powershell
+.\tools\test_windows.ps1 -Build -Suite unit
+.\tools\test_windows.ps1 -Build -Suite integration
+.\tools\test_windows.ps1 -Build -Suite verify
+.\tools\test_windows.ps1 -Build -Suite bptree-contract
+.\tools\test_windows.ps1 -Build -Suite verify -IncludeLargeVerify
+```
