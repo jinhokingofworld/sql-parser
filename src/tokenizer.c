@@ -256,6 +256,16 @@ int tokenize_sql(const char *sql, TokenArray *tokens, SqlError *error) {
                 column++;
             }
 
+            if (sql[position] == '.' && isdigit((unsigned char) sql[position + 1])) {
+                position++;
+                column++;
+
+                while (isdigit((unsigned char) sql[position])) {
+                    position++;
+                    column++;
+                }
+            }
+
             if (!append_token(tokens, TOKEN_NUMBER, sql + start, position - start, line, start_column, error)) {
                 free_token_array_on_failure(tokens);
                 return 0;

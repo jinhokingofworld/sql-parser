@@ -25,11 +25,43 @@ static int parse_int_strict(const char *text, long *value) {
     return 1;
 }
 
+static int parse_float_strict(const char *text, double *value) {
+    char *end = NULL;
+    double parsed;
+
+    errno = 0;
+    parsed = strtod(text, &end);
+    if (errno != 0 || end == text || *end != '\0') {
+        return 0;
+    }
+
+    *value = parsed;
+    return 1;
+}
+
+static const char *column_type_label(ColumnType type) {
+    switch (type) {
+        case COLUMN_TYPE_INT:
+            return "int";
+        case COLUMN_TYPE_FLOAT:
+            return "float";
+        case COLUMN_TYPE_STRING:
+            return "string";
+    }
+
+    return "unknown";
+}
+
 static int is_value_compatible(ColumnType type, const Value *value) {
     long parsed = 0;
+    double parsed_float = 0.0;
 
     if (type == COLUMN_TYPE_INT) {
         return value->type == VALUE_INT && parse_int_strict(value->raw, &parsed);
+    }
+    if (type == COLUMN_TYPE_FLOAT) {
+        return (value->type == VALUE_INT || value->type == VALUE_FLOAT) &&
+            parse_float_strict(value->raw, &parsed_float);
     }
 
     return value->type == VALUE_STRING;
@@ -42,6 +74,20 @@ static int compare_field_values(const char *left, const char *right, ColumnType 
 
         parse_int_strict(left, &left_value);
         parse_int_strict(right, &right_value);
+        if (left_value < right_value) {
+            return -1;
+        }
+        if (left_value > right_value) {
+            return 1;
+        }
+        return 0;
+    }
+    if (type == COLUMN_TYPE_FLOAT) {
+        double left_value = 0.0;
+        double right_value = 0.0;
+
+        parse_float_strict(left, &left_value);
+        parse_float_strict(right, &right_value);
         if (left_value < right_value) {
             return -1;
         }
@@ -71,7 +117,7 @@ static int row_matches_condition(const Row *row, const Schema *schema, const Con
             0,
             "type mismatch: column `%s` expects %s",
             condition->column,
-            type == COLUMN_TYPE_INT ? "int" : "string"
+            column_type_label(type)
         );
         return 0;
     }
@@ -290,7 +336,7 @@ static int execute_insert(const InsertQuery *query, const char *db_root, FILE *o
                 0,
                 "type mismatch: column `%s` expects %s",
                 query->columns[index],
-                schema.columns[schema_index].type == COLUMN_TYPE_INT ? "int" : "string"
+                column_type_label(schema.columns[schema_index].type)
             );
             goto cleanup;
         }

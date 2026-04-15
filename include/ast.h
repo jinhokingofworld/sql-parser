@@ -10,6 +10,7 @@ typedef enum {
 
 typedef enum {
     VALUE_INT,
+    VALUE_FLOAT,
     VALUE_STRING
 } ValueType;
 

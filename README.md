@@ -16,6 +16,8 @@
 - `data/schema/<table>.schema`: 테이블 스키마 정의
 - `data/tables/<table>.csv`: 실제 테이블 데이터
 - `tests/integration/*.sql`: 실행 예시 SQL 파일
+- `tools/generate_students_csv.py`: 대량 students CSV 생성기
+- `tools/load_students_csv.py`: 생성 CSV를 DB 테이블 CSV로 적재하는 bulk loader
 
 예시 schema:
 
@@ -102,6 +104,57 @@ INSERT 1
 1,Alice,20
 2,Bob,31
 3,Charlie,19
+```
+
+## 대량 students 데이터 준비
+
+B+Tree 인덱스 성능 테스트용 `students` 테이블은 아래 스키마를 사용합니다.
+
+```text
+table=students
+columns=id:int,name:string,grade:int,age:int,region:string,score:float
+pkey=id
+```
+
+현재 bulk loader는 `float` 타입을 지원한다는 전제로 `score` 값을 검증하고 적재합니다. SQL 엔진의 `float` 타입 구현은 팀원 코드가 merge된 뒤 조회/삽입 테스트를 진행합니다.
+
+### 1. row-only CSV 생성
+
+```bash
+python3 tools/generate_students_csv.py \
+  --rows 1000000 \
+  --output data/generated/students_1m.csv \
+  --seed 42
+```
+
+생성되는 컬럼 순서는 아래와 같고 header는 포함하지 않습니다.
+
+```text
+id,name,grade,age,region,score
+```
+
+`score`는 `0.00` 이상 `4.50` 이하의 소수점 2자리 값으로 생성됩니다.
+
+### 2. DB 테이블로 bulk load
+
+```bash
+python3 tools/load_students_csv.py \
+  --input data/generated/students_1m.csv \
+  --db-root data \
+  --table students \
+  --truncate \
+  --batch-size 100000
+```
+
+`--truncate`를 주면 기존 `data/tables/students.csv`를 비운 뒤 적재합니다. 기존 데이터를 유지하고 append하려면 `--truncate`를 생략합니다.
+
+생성기가 만든 순차 id 파일을 빠르게 적재할 때는 아래 옵션으로 입력 파일 내부 중복 검사를 strictly increasing 검사로 대체할 수 있습니다.
+
+```bash
+python3 tools/load_students_csv.py \
+  --input data/generated/students_1m.csv \
+  --truncate \
+  --trust-sequential-pk
 ```
 
 ## SELECT 하는 법
