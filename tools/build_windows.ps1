@@ -3,10 +3,12 @@ param(
     [string] $Target = "all"
 )
 
+# ms: Fail fast so CI-style local runs stop on the first broken build step.
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 function Get-GccCommand {
+    # ms: Resolve gcc from PATH once so every build path uses the same toolchain.
     $gcc = Get-Command gcc -ErrorAction SilentlyContinue
     if ($null -eq $gcc) {
         throw "gcc was not found in PATH"
@@ -20,6 +22,7 @@ function Invoke-Gcc {
         [string[]] $Arguments
     )
 
+    # ms: Centralize native invocation so all build failures surface uniformly.
     $gcc = Get-GccCommand
     & $gcc @Arguments
     if ($LASTEXITCODE -ne 0) {
@@ -34,6 +37,7 @@ function Build-NativeTarget {
         [string[]] $IncludeDirs
     )
 
+    # ms: Ensure target directories exist before compiling into nested test paths.
     $parent = Split-Path -Parent $OutputPath
     if ($parent) {
         New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -59,6 +63,7 @@ function Build-NativeTarget {
 }
 
 function Build-SqlProcessor {
+    # ms: Keep the application and tests on the same shared library source set.
     $libSources = @(
         "src/cli.c",
         "src/tokenizer.c",
@@ -76,6 +81,7 @@ function Build-SqlProcessor {
 }
 
 function Build-UnitTests {
+    # ms: Unit binaries all share the production sources plus the Unity helpers.
     $libSources = @(
         "src/cli.c",
         "src/tokenizer.c",
@@ -112,6 +118,7 @@ function Build-UnitTests {
 }
 
 function Build-VerifyTarget {
+    # ms: Dataset verification is a standalone executable because it exercises file fixtures directly.
     $libSources = @(
         "src/cli.c",
         "src/tokenizer.c",
@@ -132,6 +139,7 @@ function Build-VerifyTarget {
 }
 
 function Build-BptreeContract {
+    # ms: The contract test compiles independently so the adapter can be introduced later.
     Build-NativeTarget `
         -OutputPath "tests/unit/test_bptree_contract.exe" `
         -Sources @(
@@ -168,4 +176,5 @@ switch ($Target) {
     }
 }
 
+# ms: Emit a single success marker so wrapper scripts can treat this as one build step.
 Write-Host "[OK] build target '$Target' completed"

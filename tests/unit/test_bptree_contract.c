@@ -99,6 +99,7 @@ static void test_bptree_contract_waits_for_adapter(void) {
 #endif
 
 int main(void) {
+    /* ms: Drive either the real contract suite or the explicit skip placeholder. */
     UNITY_BEGIN();
 #if BPTREE_TESTS_AVAILABLE
     RUN_TEST(test_insert_then_find_single_key);

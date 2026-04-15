@@ -5,6 +5,7 @@ param(
     [switch] $IncludeLargeVerify
 )
 
+# ms: Keep PowerShell errors strict while still handling native exit codes manually.
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $false
@@ -15,6 +16,7 @@ function Invoke-NativeChecked {
         [string[]] $Arguments = @()
     )
 
+    # ms: Route every native test execution through one helper for consistent failure messages.
     & $FilePath @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "native command failed: $FilePath $($Arguments -join ' ')"
@@ -27,6 +29,7 @@ function Invoke-NativeExpectFailure {
         [string[]] $Arguments = @()
     )
 
+    # ms: Negative fixtures are valid only when the target exits non-zero.
     $quotedArgs = @("""$FilePath""")
     foreach ($argument in $Arguments) {
         $quotedArgs += """$argument"""
@@ -43,6 +46,7 @@ function Normalize-Text {
         [string] $Text
     )
 
+    # ms: Integration assertions should ignore Windows vs Unix line-ending differences.
     if ($null -eq $Text) {
         return ""
     }
@@ -57,12 +61,14 @@ function Assert-TextEqual {
         [string] $Label
     )
 
+    # ms: Use normalized text comparison so fixture mismatches are semantic, not newline-related.
     if ((Normalize-Text -Text $Expected) -ne (Normalize-Text -Text $Actual)) {
         throw "output mismatch: $Label"
     }
 }
 
 function New-IntegrationDb {
+    # ms: Each integration case gets an isolated copy of the fixture database to avoid cross-test state.
     $tempRoot = Join-Path $env:TEMP ("sql-parser-integration-" + [guid]::NewGuid().ToString())
     $schemaDir = Join-Path $tempRoot "schema"
     $tableDir = Join-Path $tempRoot "tables"
@@ -81,6 +87,7 @@ function Invoke-IntegrationCase {
         [string] $ExpectedPath
     )
 
+    # ms: Run the SQL file end-to-end and compare rendered output against the checked-in fixture.
     $dbRoot = New-IntegrationDb
     try {
         $actual = & ".\sql_processor.exe" --sql $SqlPath --db $dbRoot | Out-String
@@ -99,6 +106,7 @@ function Invoke-PythonChecked {
         [string[]] $Arguments
     )
 
+    # ms: Dataset generation is external to the C binaries, so guard it with explicit exit-code checks.
     & python @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "python failed: python $($Arguments -join ' ')"
@@ -106,6 +114,7 @@ function Invoke-PythonChecked {
 }
 
 function Run-UnitSuite {
+    # ms: Keep the unit suite order stable so failures are easy to map back to the legacy Makefile flow.
     Invoke-NativeChecked -FilePath ".\tests\unit\test_tokenizer.exe"
     Invoke-NativeChecked -FilePath ".\tests\unit\test_parser.exe"
     Invoke-NativeChecked -FilePath ".\tests\unit\test_storage.exe"
@@ -113,10 +122,12 @@ function Run-UnitSuite {
 }
 
 function Run-BptreeContractSuite {
+    # ms: The adapter-backed contract test is isolated so it can be enabled independently.
     Invoke-NativeChecked -FilePath ".\tests\unit\test_bptree_contract.exe"
 }
 
 function Run-IntegrationSuite {
+    # ms: These fixtures lock down the CLI-visible behavior for the current SQL feature set.
     Invoke-IntegrationCase -SqlPath "tests/integration/insert_select.sql" -ExpectedPath "tests/integration/insert_select.expected"
     Invoke-IntegrationCase -SqlPath "tests/integration/select_where.sql" -ExpectedPath "tests/integration/select_where.expected"
     Invoke-IntegrationCase -SqlPath "tests/integration/select_order_by.sql" -ExpectedPath "tests/integration/select_order_by.expected"
@@ -125,6 +136,7 @@ function Run-IntegrationSuite {
 }
 
 function Run-VerifySuite {
+    # ms: Verification covers generated dataset contracts plus negative fixtures for malformed input.
     New-Item -ItemType Directory -Force -Path "data/generated" | Out-Null
 
     Invoke-PythonChecked -Arguments @(
@@ -171,6 +183,7 @@ function Run-VerifySuite {
 }
 
 if ($Build) {
+    # ms: Optional rebuild keeps local test runs aligned with the currently checked-out sources.
     & ".\tools\build_windows.ps1" -Target tests
     if ($LASTEXITCODE -ne 0) {
         throw "build_windows.ps1 failed"
@@ -198,4 +211,5 @@ switch ($Suite) {
     }
 }
 
+# ms: One final marker makes it obvious the selected suite completed without an early throw.
 Write-Host "[OK] test suite '$Suite' completed"

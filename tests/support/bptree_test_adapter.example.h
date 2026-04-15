@@ -14,6 +14,7 @@
  *   int bptree_test_find(BptreeTestHandle tree, long key, long *out_value);
  */
 
+/* ms: Keep the example commented out so the repository compiles before the real adapter exists. */
 /*
 typedef struct BPlusTree *BptreeTestHandle;
 
