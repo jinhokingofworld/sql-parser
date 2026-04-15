@@ -23,9 +23,9 @@ pkey=id
 - 현재 `data/tables/users.csv`와 `data/tables/students.csv`는 비어 있다.
 - `src/storage.c`는 CSV 파일을 append/read 하는 구조이고, `read_csv_rows()`는 CSV 전체를 메모리에 읽는다.
 - `src/executor.c`의 `INSERT`는 primary key 중복 확인을 위해 매 insert마다 전체 CSV를 읽는다.
-- 현재 C 타입 시스템은 `int`, `string`만 지원한다.
-- `score:float`는 실제 float 타입으로 사용하기로 결정했으며, C 코드의 float 타입 지원은 팀원 코드 merge 후 확인한다.
-- 이번 bulk loader는 float 타입이 지원된다는 전제로 `students.schema`의 `score:float`를 읽고 입력 CSV의 float 값을 검증한다.
+- 현재 C 타입 시스템은 `int`, `float`, `string`을 지원한다.
+- `score:float`는 실제 float 타입으로 사용하며, float WHERE 조건과 ORDER BY 비교가 동작하는 것을 확인했다.
+- bulk loader는 `students.schema`의 `score:float`를 읽고 입력 CSV의 float 값을 검증한다.
 
 ## 목표 데이터 구조
 
@@ -162,17 +162,17 @@ ok reproducible_sample_valid
 7. bulk loader는 적재 전 중복 id 검사를 한 번만 수행하거나, 생성기가 보장하는 순차 id를 신뢰하는 fast path를 제공한다.
 
 진행 상태:
-- [ ] `float` 타입 지원
-> 이걸 다른 팀원이 해주기로 했어. float타입이 지원된다는 것을 가정하고, 데이터 작성기를 만들면 좋을 것 같아.
+- [x] `float` 타입 지원
+> 팀원이 제공한 float 지원 코드를 merge했고, `make test`와 students 조회 테스트로 확인했다.
 - [x] `students` 스키마 추가
 - [x] loader는 header 없는 CSV를 입력으로 받는 방향을 유지한다.
 - [x] `tools/load_students_csv.py` 작성 완료
-- [x] loader는 `float` 타입이 지원된다는 전제로 `score:float`를 검증한다.
+- [x] loader는 `score:float`를 검증한다.
 - [x] `--input`, `--db-root`, `--table`, `--truncate`, `--batch-size` 옵션 구현
 - [x] 생성기가 보장하는 순차 primary key를 빠르게 검증하는 `--trust-sequential-pk` 옵션 구현
 - [x] loader 문법 검증 완료: `python3 -m py_compile tools/load_students_csv.py`
 - [x] loader CLI 확인 완료: `python3 tools/load_students_csv.py --help`
-- [ ] 실제 적재 테스트는 팀원의 C float 타입 지원 코드 merge 후 진행한다.
+- [x] 실제 적재 테스트는 C float 타입 지원 코드 merge 후 진행 완료
 
 ### 6. 삽입기 검증
 
@@ -184,16 +184,28 @@ ok reproducible_sample_valid
 
 진행 상태:
 - [x] 삽입기 검증은 C float 타입 지원 코드가 merge된 뒤 진행하기로 결정했다.
-- [ ] 10건 샘플 CSV bulk load 테스트
-- [ ] `SELECT * FROM students;` 조회 테스트
-- [ ] `SELECT id, name FROM students WHERE id = 1;` 조회 테스트
-- [ ] 10,000건 bulk load 테스트
-- [ ] 100,000건 bulk load 테스트
-- [ ] 1,000,000건 bulk load 테스트
-- [ ] line count 검증
-- [ ] 잘못된 컬럼 개수 실패 케이스 검증
-- [ ] 잘못된 타입 실패 케이스 검증
-- [ ] 중복 id 실패 케이스 검증
+- [x] 10건 샘플 CSV bulk load 테스트
+- [x] `SELECT id, name, score FROM students WHERE id = 1;` 조회 테스트
+- [x] `SELECT id, name, score FROM students WHERE score = 4.31;` float 조회 테스트
+- [x] `SELECT id, score FROM students ORDER BY score DESC;` float 정렬 테스트
+- [x] 10,000건 bulk load 테스트
+- [x] 100,000건 bulk load 테스트
+- [x] 1,000,000건 bulk load 테스트
+- [x] line count 검증
+- [x] 잘못된 컬럼 개수 실패 케이스 검증
+- [x] 잘못된 타입 실패 케이스 검증
+- [x] 중복 id 실패 케이스 검증
+
+검증 결과:
+- `make test` 통과
+- 10건 적재 후 `data/tables/students.csv` line count 10 확인
+- 10,000건 적재 후 `/tmp` DB line count 10,000 확인
+- 100,000건 적재 후 `/tmp` DB line count 100,000 확인
+- 1,000,000건 적재 후 `/tmp` DB line count 1,000,000 확인
+- 100,000건 적재 시간: 약 0.25초
+- 1,000,000건 적재 시간: 약 1.81초
+- 1,000,000건에서 `SELECT id, name, score FROM students WHERE id = 500000;` 결과 1건 확인
+- 1,000,000건에서 `SELECT id, name, score FROM students WHERE score = 4.31;` 결과 2,257건 확인
 
 ### 7. 현재 SQL 엔진의 대량 데이터 병목 정리
 
@@ -242,12 +254,12 @@ SELECT * FROM students ORDER BY id;
 - [x] `tools/generate_students_csv.py` 작성
 - [x] 소량 샘플 데이터 생성 테스트
 - [x] `tools/load_students_csv.py` 작성
-- [x] 삽입기는 `score:float` 지원을 가정하고 작성
+- [x] 삽입기는 `score:float` 지원에 맞춰 작성
 - [x] 삽입기 문법/CLI 확인
-- [ ] 팀원 float 타입 지원 코드 merge
-- [ ] 소량 CSV bulk load 테스트
-- [ ] 10,000건 bulk load 테스트
-- [ ] 100,000건 bulk load 테스트
-- [ ] 1,000,000건 bulk load 테스트
+- [x] 팀원 float 타입 지원 코드 merge
+- [x] 소량 CSV bulk load 테스트
+- [x] 10,000건 bulk load 테스트
+- [x] 100,000건 bulk load 테스트
+- [x] 1,000,000건 bulk load 테스트
 - [ ] full scan 기준 성능 측정
 - [ ] B+Tree 인덱스 설계와 적용 작업으로 넘어가기
