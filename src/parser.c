@@ -86,7 +86,7 @@ static int parse_value(TokenStream *stream, Value *value, SqlError *error) {
     const Token *token = peek_token(stream);
 
     if (token->type == TOKEN_NUMBER) {
-        value->type = VALUE_INT;
+        value->type = strchr(token->lexeme, '.') != NULL ? VALUE_FLOAT : VALUE_INT;
         value->raw = duplicate_token_lexeme(token, error);
     } else if (token->type == TOKEN_STRING) {
         value->type = VALUE_STRING;

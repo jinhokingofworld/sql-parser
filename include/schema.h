@@ -5,6 +5,7 @@
 
 typedef enum {
     COLUMN_TYPE_INT,
+    COLUMN_TYPE_FLOAT,
     COLUMN_TYPE_STRING
 } ColumnType;
 

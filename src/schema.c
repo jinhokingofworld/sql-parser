@@ -9,6 +9,10 @@ static ColumnType parse_column_type(const char *text, int *ok) {
         *ok = 1;
         return COLUMN_TYPE_INT;
     }
+    if (sql_stricmp(text, "float") == 0) {
+        *ok = 1;
+        return COLUMN_TYPE_FLOAT;
+    }
     if (sql_stricmp(text, "string") == 0) {
         *ok = 1;
         return COLUMN_TYPE_STRING;

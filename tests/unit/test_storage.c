@@ -4,6 +4,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#ifdef _WIN32
+#include <direct.h>
+#define sql_mkdir(path) _mkdir(path)
+#else
+#define sql_mkdir(path) mkdir(path, 0700)
+#endif
+
 static int assert_true(int condition, const char *message) {
     if (!condition) {
         fprintf(stderr, "assertion failed: %s\n", message);
@@ -13,14 +20,14 @@ static int assert_true(int condition, const char *message) {
 }
 
 static int create_temp_db(char *path, size_t size) {
-    snprintf(path, size, "/tmp/sql-parser-storage-%ld", (long) getpid());
+    snprintf(path, size, "tmp-sql-parser-storage-%ld", (long) getpid());
     unlink(path);
     rmdir(path);
-    if (mkdir(path, 0700) != 0) {
+    if (sql_mkdir(path) != 0) {
         return 0;
     }
     snprintf(path + strlen(path), size - strlen(path), "/tables");
-    if (mkdir(path, 0700) != 0) {
+    if (sql_mkdir(path) != 0) {
         return 0;
     }
     path[strlen(path) - strlen("/tables")] = '\0';
