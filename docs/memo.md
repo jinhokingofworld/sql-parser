@@ -1,116 +1,40 @@
-요구사항
-•
-이번 주 과제는 ‘SQL 처리기’ 구현입니다.
+# 작업 메모
 
-•
-텍스트파일로 작성된 SQL문을 Command Line 명령을 통해 SQL처리기에 전달 할 수 있어야 합니다. 
+## 현재 구현 요약
 
-•
-SQL 파싱
+최근 차수까지 반영된 핵심 사항은 다음과 같습니다.
 
-◦
-입력된 SQL 문장을 분석하여 구조화합니다.
+- `users` 테이블을 6컬럼 스키마로 확장
+- `score:float` 지원
+- `BETWEEN` 지원
+- `DbContext` 도입
+- `id` 기준 B+ 트리 인덱스 도입
+- auto-increment `id` 지원
+- 대량 `INSERT` 시 `RowSet` amortized append 적용
+- devcontainer 기준 `make test` 통과
 
-◦
-최소 지원
+## 최근 해결한 이슈
 
-▪
-INSERT
+### 대량 INSERT 복잡도
 
-▪
-SELECT
+이전에는 매 INSERT마다 row 배열 전체를 다시 복사할 수 있는 구조라 대량 적재 성능이 크게 저하될 수 있었습니다. 현재는 `row_capacity` 기반 증가 전략을 사용해 이 문제를 완화했습니다.
 
-•
-실행(Execution)
+### devcontainer 테스트 게이트
 
-◦
-파싱된 결과를 기반으로 실제 동작을 실행합니다.
+다음 두 문제를 정리했습니다.
 
-◦
-INSERT
+- unit test 경로 조합 경고
+- integration expected 파일의 CRLF/LF 차이
 
-▪
-데이터를 파일에 저장
+## 현재 남아 있는 후속 과제
 
-◦
-SELECT
+- benchmark 실행 코드 구현
+- 인덱스 무효화 경로 실패 주입 테스트
+- 보조 인덱스 필요성 재검토
+- 제출/발표용 성능 수치 정리
 
-▪
-파일에서 데이터를 읽어서 출력
+## 참고 문서
 
-•
-데이터 저장(File기반 DB)
-
-◦
-각 테이블은 파일로 관리합니다.
-
-◦
-요구사항
-
-▪
-INSERT → 파일에 데이터를 추가
-
-▪
-SELECT → 파일에서 데이터 읽기
-
-◦
-데이터 저장 포맷
-
-▪
-자유롭게 설계(CSV/binary/custom 등)
-
-•
-전체 조건
-
-◦
-schema 및 table은 이미 존재한다고 가정
-
-◦
-즉, CREATE TABLE은 구현하지 않아도 됩니다.
-
-•
-기술조건
-
-◦
-구현 언어: C
-
-•
-“학습”보다는 “구현”이 우선입니다. AI 등을 적극적으로 활용하여 결과물을 만들어내는 것이 최우선 목표입니다.
-
-◦
-다만, 만들어진 결과물 중 핵심 로직에 대해서는 이해하고 설명할 수 있어야 합니다.
-
-◦
-코드를 직접 작성하기 어려운 경우, 전체 코드를 AI를 통해 생성해도 괜찮습니다. 다만, 생성된 코드를 반드시 학습하고 그 원리를 이해해야 합니다.
-
-•
-추가적으로, 다른 팀과의 차별점을 둘 수 있는 추가 구현 요소에 대해서도 함께 고민해 보시기 바랍니다.
-
-중점 포인트
-•
-SQL 문장을 읽고, 파싱하고, 실행하는 ‘처리기(Processor)’를 만드는 것
-
-◦
-입력(SQL) → 파싱 → 실행 → 저장
-
-•
-파일 기반 데이터 저장 방식 설계
-
-•
-DB 처리 흐름 이해
-
-•
-CLI (Command Line Interface) 구현
-
-품질
-•
-단위 테스트를 통해 함수를 검증합니다.
-
-•
-기능 테스트를 통해 SQL 처리가 잘되는지 확인합니다.
-
-•
-엣지 케이스를 최대한 고려 합니다.
-
-•
-이력서와 포트폴리오에 포함할 수 있을 만큼 완성도 높은 수준으로 구현합니다.
+- [README.md](/C:/Users/cutan/Documents/krafton_jungle_git/sql-parser/README.md)
+- [architecture.md](/C:/Users/cutan/Documents/krafton_jungle_git/sql-parser/docs/architecture.md)
+- [plan_bptree.md](/C:/Users/cutan/Documents/krafton_jungle_git/sql-parser/docs/plan_bptree.md)

@@ -9,8 +9,8 @@ static int assert_true(int condition, const char *message) {
 }
 
 int main(void) {
-    const char *sql = "SeLeCt id, name FROM users WHERE age = 20 ORDER BY name;";
     const char *float_sql = "INSERT INTO students (score) VALUES (4.5);";
+    const char *sql = "SeLeCt id, name FROM users WHERE score BETWEEN 3.25 AND 4.50 ORDER BY score DESC;";
     TokenArray tokens = {NULL, 0};
     TokenArray float_tokens = {NULL, 0};
     SqlError error = {0, 0, {0}};
@@ -22,7 +22,7 @@ int main(void) {
         return 1;
     }
 
-    if (!assert_true(tokens.count == 15, "unexpected token count")) {
+    if (!assert_true(tokens.count == 18, "unexpected token count")) {
         free_token_array(&tokens);
         return 1;
     }
@@ -34,11 +34,19 @@ int main(void) {
         free_token_array(&tokens);
         return 1;
     }
-    if (!assert_true(tokens.items[9].type == TOKEN_NUMBER, "WHERE value should be number")) {
+    if (!assert_true(tokens.items[9].type == TOKEN_NUMBER, "BETWEEN low value should be number")) {
         free_token_array(&tokens);
         return 1;
     }
-    if (!assert_true(tokens.items[12].type == TOKEN_IDENTIFIER, "ORDER BY target should be identifier")) {
+    if (!assert_true(strcmp(tokens.items[9].lexeme, "3.25") == 0, "float literal should match")) {
+        free_token_array(&tokens);
+        return 1;
+    }
+    if (!assert_true(tokens.items[11].type == TOKEN_NUMBER, "BETWEEN high value should be number")) {
+        free_token_array(&tokens);
+        return 1;
+    }
+    if (!assert_true(tokens.items[14].type == TOKEN_IDENTIFIER, "ORDER BY target should be identifier")) {
         free_token_array(&tokens);
         return 1;
     }

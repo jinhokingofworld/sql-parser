@@ -19,9 +19,17 @@ typedef struct {
     char *raw;
 } Value;
 
+typedef enum {
+    COND_EQ,
+    COND_BETWEEN
+} ConditionType;
+
 typedef struct {
+    ConditionType type;
     char *column;
     Value value;
+    Value low;
+    Value high;
 } Condition;
 
 typedef struct {
