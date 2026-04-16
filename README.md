@@ -26,7 +26,8 @@
 
 ## 3. B+Tree란?
 
-<img src="https://user-images.githubusercontent.com/23310187/34244435-91eab306-e668-11e7-8063-735dff683bf8.png" width="90%"></img>
+<img width="665" height="294" alt="Image" src="https://github.com/user-attachments/assets/8ec1b430-1f3c-41ef-b46b-417ca281d208" />
+
 PostgreSQL의 인덱스 구조
 
 ## 핵심 특징
